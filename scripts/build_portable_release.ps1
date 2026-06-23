@@ -1,7 +1,7 @@
 param(
     [string]$Version = "dev",
     [string]$OutputRoot = "dist",
-    [string]$PcNsfUrl = "https://github.com/openvpi/vocoders/releases/download/pc-nsf-hifigan-44.1k-hop512-128bin-2025.02/pc_nsf_hifigan_44.1k_hop512_128bin_2025.02.zip",
+    [string]$PcNsfUrl = "https://github.com/openvpi/vocoders/releases/download/pc-nsf-hifigan-44.1k-hop512-128bin-2025.02/pc_nsf_hifigan_44.1k_hop512_128bin_2025.02.oudep",
     [string]$LoFiVocoderUrl = "https://huggingface.co/usamireko/LoFiVocoder/resolve/main/LoFiVocoder-20260203.zip",
     [string]$HnsepUrl = "https://github.com/yxlllc/vocal-remover/releases/download/hnsep_240512/hnsep_240512.zip"
 )
@@ -31,7 +31,8 @@ function Download-And-Extract {
     New-Item -ItemType Directory -Force -Path (Split-Path $ZipPath -Parent) | Out-Null
     Invoke-WebRequest -Uri $Url -OutFile $ZipPath
     Reset-Directory $Destination
-    Expand-Archive -LiteralPath $ZipPath -DestinationPath $Destination -Force
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($ZipPath, $Destination)
 }
 
 function Copy-FirstFile {
@@ -132,7 +133,7 @@ try {
 
     Download-And-Extract `
         -Url $PcNsfUrl `
-        -ZipPath (Join-Path $downloadRoot "pc_nsf.zip") `
+        -ZipPath (Join-Path $downloadRoot "pc_nsf.oudep") `
         -Destination (Join-Path $extractRoot "pc_nsf")
 
     Download-And-Extract `

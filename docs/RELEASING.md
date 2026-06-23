@@ -61,7 +61,7 @@ The build downloads:
 
 ```text
 PC-NSF:
-https://github.com/openvpi/vocoders/releases/download/pc-nsf-hifigan-44.1k-hop512-128bin-2025.02/pc_nsf_hifigan_44.1k_hop512_128bin_2025.02.zip
+https://github.com/openvpi/vocoders/releases/download/pc-nsf-hifigan-44.1k-hop512-128bin-2025.02/pc_nsf_hifigan_44.1k_hop512_128bin_2025.02.oudep
 
 LoFiVocoder:
 https://huggingface.co/usamireko/LoFiVocoder/resolve/main/LoFiVocoder-20260203.zip
@@ -76,4 +76,5 @@ HNSEP is copied from the source archive without conversion:
 models/hnsep/vr/model.pt
 ```
 
+The PC-NSF `.oudep` file is a ZIP archive and is extracted by the build script.
 Model file names are normalized after extraction so the portable config can rely on stable paths.
