@@ -11,3 +11,4 @@ pyloudnorm
 tomli
 filelock
 ruamel.yaml
+customtkinter

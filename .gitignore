@@ -19,12 +19,17 @@ Properties/
 x64/
 x86/
 publish/
+build/
+dist/
 .idea/
 .vscode/
 .venv/
 venv/
+.uv-cache/
+.uv-python/
 __pycache__/
 config.yaml
+!portable/config.yaml
 uv.exe
 hnsep/vr/
 pc_nsf_hifigan_44.1k_hop512_128bin_2025.02/

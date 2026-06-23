@@ -4,6 +4,7 @@ Convert HN-SEP PyTorch model to ONNX format for inference optimization.
 """
 
 import os
+import argparse
 import torch
 import torch.nn as nn
 import yaml
@@ -193,12 +194,16 @@ def convert_to_onnx(model_path, output_path=None, device=torch.device('cpu')):
 
 def main():
     """Main conversion function."""
+    parser = argparse.ArgumentParser(description="Convert HN-SEP PyTorch model to ONNX.")
+    parser.add_argument("--model-dir", default="vr", help="Directory containing model_fp16.pt and config.yaml.")
+    parser.add_argument("--output", default=None, help="Output ONNX path. Defaults to model-dir/model_fp16.onnx.")
+    args_cli = parser.parse_args()
     
     # Default paths
-    model_dir = Path("vr")
+    model_dir = Path(args_cli.model_dir)
     pt_model_path = model_dir / "model_fp16.pt"
     fp16_model_path = model_dir / "model_fp16.pt"
-    onnx_output_path = model_dir / "model_fp16.onnx"
+    onnx_output_path = Path(args_cli.output) if args_cli.output else model_dir / "model_fp16.onnx"
     
     # Check which model exists
     if pt_model_path.exists():

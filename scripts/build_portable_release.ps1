@@ -96,6 +96,7 @@ try {
     Write-Host "Syncing Python environment with uv"
     uv sync
     uv pip install pyinstaller onnx onnxslim
+    uv run python -c "import torch; print(f'Build torch: {torch.__version__}, cuda={torch.version.cuda}'); assert torch.version.cuda is None, 'Expected CPU-only torch in build environment'"
 
     Write-Host "Building hifisampler.exe"
     dotnet publish .\client\hifisampler.csproj -c Release -r win-x64 /p:PublishAot=true /p:DebugType=none /p:DebugSymbols=false -o .\build\client-win-x64
@@ -165,6 +166,7 @@ try {
     $runtimePython = Join-Path $stageRoot "runtime\python.exe"
     uv pip install --python $runtimePython --system --index-url https://download.pytorch.org/whl/cpu torch
     uv pip install --python $runtimePython --system --extra-index-url https://download.pytorch.org/whl/cpu -r .\requirements.txt
+    & $runtimePython -c "import torch; print(f'Runtime torch: {torch.__version__}, cuda={torch.version.cuda}'); assert torch.version.cuda is None, 'Expected CPU-only torch in portable runtime'"
 
     Copy-FirstFile `
         -SearchRoot (Join-Path $extractRoot "pc_nsf") `

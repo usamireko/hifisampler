@@ -1,16 +1,23 @@
 import logging
+import os
 from pathlib import Path
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
 logging.basicConfig(format='%(message)s', level=logging.INFO)
 
+
+def resolve_config_paths(script_path: Path):
+    script_dir = script_path.parent
+    config_path = Path(os.environ.get('HIFISAMPLER_CONFIG', script_dir / 'config.yaml'))
+    default_config_path = Path(os.environ.get('HIFISAMPLER_DEFAULT_CONFIG', script_dir / 'config.default.yaml'))
+    return config_path, default_config_path
+
+
 def load_config_from_yaml(script_path: Path):
     def decorator(cls):
         try:
-            script_dir = script_path.parent
-            config_path = script_dir / 'config.yaml'
-            default_config_path = script_dir / 'config.default.yaml'
+            config_path, default_config_path = resolve_config_paths(script_path)
             
             update_config(config_path, default_config_path)
 
