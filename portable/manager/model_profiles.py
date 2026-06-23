@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 
-PORTABLE_ROOT = Path(__file__).resolve().parents[1]
+def find_portable_root() -> Path:
+    env_root = os.environ.get("HIFISAMPLER_PORTABLE_ROOT")
+    if env_root:
+        return Path(env_root).resolve()
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[1]
+
+
+PORTABLE_ROOT = find_portable_root()
 CONFIG = PORTABLE_ROOT / "config.yaml"
 DEFAULT_CONFIG = PORTABLE_ROOT / "config.default.yaml"
 MODELS_DIR = PORTABLE_ROOT / "models"

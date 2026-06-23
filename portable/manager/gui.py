@@ -39,9 +39,22 @@ def find_server_script() -> Path | None:
 
 def process_env() -> dict[str, str]:
     env = os.environ.copy()
+    env["HIFISAMPLER_PORTABLE_ROOT"] = str(PORTABLE_ROOT)
     env["HIFISAMPLER_CONFIG"] = str(PORTABLE_ROOT / "config.yaml")
     env["HIFISAMPLER_DEFAULT_CONFIG"] = str(PORTABLE_ROOT / "config.default.yaml")
     return env
+
+
+def subprocess_startup_options() -> dict[str, object]:
+    if os.name != "nt":
+        return {}
+
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    return {
+        "creationflags": subprocess.CREATE_NO_WINDOW,
+        "startupinfo": startupinfo,
+    }
 
 
 class HifisamplerManager(ctk.CTk):
@@ -187,6 +200,7 @@ class HifisamplerManager(ctk.CTk):
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                **subprocess_startup_options(),
             )
             if process.stdout:
                 for line in process.stdout:
@@ -310,6 +324,7 @@ class HifisamplerManager(ctk.CTk):
                     text=True,
                     encoding="utf-8",
                     errors="replace",
+                    **subprocess_startup_options(),
                 )
                 if self.server_process.stdout:
                     for line in self.server_process.stdout:
@@ -325,11 +340,26 @@ class HifisamplerManager(ctk.CTk):
         if self.server_process is None:
             return
         self.append_line("> Stopping server")
-        self.server_process.terminate()
+        self._stop_server_process()
+
+    def _stop_server_process(self) -> None:
+        if self.server_process is None:
+            return
+
+        process = self.server_process
+        process.terminate()
         try:
-            self.server_process.wait(timeout=3)
+            process.wait(timeout=3)
         except subprocess.TimeoutExpired:
-            self.server_process.kill()
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    **subprocess_startup_options(),
+                )
+            else:
+                process.kill()
 
     def _server_finished(self, exit_code: int) -> None:
         self.server_process = None
@@ -352,10 +382,8 @@ class HifisamplerManager(ctk.CTk):
 
     def destroy(self) -> None:
         if self.server_process is not None:
-            answer = messagebox.askyesno("Server Running", "The hifisampler server is still running. Stop it and exit?")
-            if not answer:
-                return
-            self.stop_server()
+            self.append_line("> Manager closing. Stopping server")
+            self._stop_server_process()
         super().destroy()
 
 
