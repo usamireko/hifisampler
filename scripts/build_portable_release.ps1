@@ -71,6 +71,21 @@ function Copy-DirectoryClean {
     Copy-Item -Path (Join-Path $Source "*") -Destination $Destination -Recurse -Force
 }
 
+function Copy-IfExists {
+    param(
+        [string]$Source,
+        [string]$Destination
+    )
+
+    if (Test-Path $Source) {
+        Copy-Item -LiteralPath $Source -Destination $Destination -Force
+        Write-Host "Copied $Source -> $Destination"
+    }
+    else {
+        Write-Host "Skipping missing optional file: $Source"
+    }
+}
+
 function Get-PythonInstallRoot {
     if ($env:pythonLocation -and (Test-Path (Join-Path $env:pythonLocation "python.exe"))) {
         return $env:pythonLocation
@@ -131,14 +146,21 @@ try {
         -Destination (Join-Path $extractRoot "hnsep")
 
     Write-Host "Preparing HNSEP source for ONNX conversion"
-    $hnsepModel = Get-ChildItem -Path (Join-Path $extractRoot "hnsep") -Recurse -File -Filter "model_fp16.pt" | Select-Object -First 1
+    $hnsepCandidates = @()
+    $hnsepCandidates += Get-ChildItem -Path (Join-Path $extractRoot "hnsep") -Recurse -File -Filter "model_fp16.pt"
+    $hnsepCandidates += Get-ChildItem -Path (Join-Path $extractRoot "hnsep") -Recurse -File -Filter "model.pt"
+    $hnsepModel = $hnsepCandidates | Sort-Object -Property Length -Descending | Select-Object -First 1
     if (-not $hnsepModel) {
-        throw "HNSEP model_fp16.pt not found after extraction."
+        throw "HNSEP model file not found after extraction. Expected model_fp16.pt or model.pt."
     }
     $hnsepSourceDir = Split-Path $hnsepModel.FullName -Parent
     $hnsepWorkDir = Join-Path $repoRoot "hnsep\vr"
     Reset-Directory $hnsepWorkDir
     Copy-Item -Path (Join-Path $hnsepSourceDir "*") -Destination $hnsepWorkDir -Recurse -Force
+    if (-not (Test-Path (Join-Path $hnsepWorkDir "model_fp16.pt"))) {
+        Copy-Item -LiteralPath $hnsepModel.FullName -Destination (Join-Path $hnsepWorkDir "model_fp16.pt") -Force
+        Write-Host "Normalized HNSEP model to hnsep\vr\model_fp16.pt"
+    }
 
     Write-Host "Converting HNSEP to ONNX"
     uv run python .\hnsep\convert_hnsep_to_onnx.py --model-dir .\hnsep\vr --output .\hnsep\vr\model_fp16.onnx
@@ -151,7 +173,8 @@ try {
     Copy-Item -LiteralPath ".\build\client-win-x64\hifisampler.exe" -Destination (Join-Path $stageRoot "hifisampler.exe") -Force
     Copy-Item -LiteralPath ".\hifiserver.py" -Destination $stageRoot -Force
     Copy-Item -LiteralPath ".\config.py" -Destination $stageRoot -Force
-    Copy-Item -LiteralPath ".\README_PORTABLE.md" -Destination (Join-Path $stageRoot "README_PORTABLE.md") -Force
+    Copy-Item -LiteralPath ".\README.md" -Destination (Join-Path $stageRoot "README.md") -Force
+    Copy-IfExists -Source ".\README_PORTABLE.md" -Destination (Join-Path $stageRoot "README_PORTABLE.md")
     Copy-Item -Path ".\backend" -Destination (Join-Path $stageRoot "backend") -Recurse -Force
     Copy-Item -Path ".\util" -Destination (Join-Path $stageRoot "util") -Recurse -Force
     Copy-Item -Path ".\hnsep" -Destination (Join-Path $stageRoot "hnsep") -Recurse -Force
