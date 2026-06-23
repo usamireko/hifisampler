@@ -96,6 +96,13 @@ function Get-PythonInstallRoot {
     return (Split-Path $pythonExe -Parent)
 }
 
+function Assert-LastExitCode {
+    param([string]$Step)
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Step failed with exit code $LASTEXITCODE."
+    }
+}
+
 $repoRoot = Resolve-RepoRoot
 $buildRoot = Join-Path $repoRoot "build\portable-release"
 $downloadRoot = Join-Path $buildRoot "downloads"
@@ -111,11 +118,15 @@ Push-Location $repoRoot
 try {
     Write-Host "Syncing Python environment with uv"
     uv sync
+    Assert-LastExitCode "uv sync"
     uv pip install pyinstaller
+    Assert-LastExitCode "uv pip install pyinstaller"
     uv run python -c "import torch; print(f'Build torch: {torch.__version__}, cuda={torch.version.cuda}'); assert torch.version.cuda is None, 'Expected CPU-only torch in build environment'"
+    Assert-LastExitCode "build torch validation"
 
     Write-Host "Building hifisampler.exe"
     dotnet publish .\client\hifisampler.csproj -c Release -r win-x64 /p:PublishAot=true /p:DebugType=none /p:DebugSymbols=false -o .\build\client-win-x64
+    Assert-LastExitCode "dotnet publish hifisampler.exe"
 
     Write-Host "Building HifisamplerManager.exe"
     uv run pyinstaller `
@@ -130,6 +141,7 @@ try {
         --workpath build\manager-work `
         --specpath build\manager-spec `
         portable\manager\gui.py
+    Assert-LastExitCode "PyInstaller HifisamplerManager.exe"
 
     Download-And-Extract `
         -Url $PcNsfUrl `
@@ -182,8 +194,11 @@ try {
     Copy-Item -Path (Join-Path $pythonRoot "*") -Destination (Join-Path $stageRoot "runtime") -Recurse -Force
     $runtimePython = Join-Path $stageRoot "runtime\python.exe"
     uv pip install --python $runtimePython --system --index-url https://download.pytorch.org/whl/cpu torch
+    Assert-LastExitCode "runtime torch install"
     uv pip install --python $runtimePython --system --extra-index-url https://download.pytorch.org/whl/cpu -r .\requirements.txt
+    Assert-LastExitCode "runtime requirements install"
     & $runtimePython -c "import torch; print(f'Runtime torch: {torch.__version__}, cuda={torch.version.cuda}'); assert torch.version.cuda is None, 'Expected CPU-only torch in portable runtime'"
+    Assert-LastExitCode "runtime torch validation"
 
     Copy-FirstFile `
         -SearchRoot (Join-Path $extractRoot "pc_nsf") `
