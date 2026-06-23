@@ -12,3 +12,5 @@ tomli
 filelock
 ruamel.yaml
 customtkinter
+aiohttp
+praat-parselmouth
