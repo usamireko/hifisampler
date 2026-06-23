@@ -68,6 +68,7 @@ LoFiVocoder
 Use the model selector in `Hifisampler Manager`, then click `Apply Model`. If the server is running, restart it to apply the selected model.
 
 
+
 ## Manager Actions
 
 `Prepare Portable`

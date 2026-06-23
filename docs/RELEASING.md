@@ -25,7 +25,7 @@ The portable Windows CPU package is built by GitHub Actions from tags.
 
 Use `workflow_dispatch` from the Actions tab to create a build artifact without creating a GitHub Release.
 
-Manual builds are useful for testing download links, model normalization, HNSEP conversion, PyInstaller, and package layout before tagging.
+Manual builds are useful for testing download links, model normalization, PyInstaller, and package layout before tagging.
 
 ## Tag and Release Policy
 
@@ -70,10 +70,10 @@ HNSEP:
 https://github.com/yxlllc/vocal-remover/releases/download/hnsep_240512/hnsep_240512.zip
 ```
 
-HNSEP is converted to ONNX during the build and copied to:
+HNSEP is copied from the source archive without conversion:
 
 ```text
-models/hnsep/vr/model_fp16.onnx
+models/hnsep/vr/model.pt
 ```
 
 Model file names are normalized after extraction so the portable config can rely on stable paths.

@@ -110,7 +110,7 @@ Push-Location $repoRoot
 try {
     Write-Host "Syncing Python environment with uv"
     uv sync
-    uv pip install pyinstaller onnx onnxslim
+    uv pip install pyinstaller
     uv run python -c "import torch; print(f'Build torch: {torch.__version__}, cuda={torch.version.cuda}'); assert torch.version.cuda is None, 'Expected CPU-only torch in build environment'"
 
     Write-Host "Building hifisampler.exe"
@@ -145,25 +145,18 @@ try {
         -ZipPath (Join-Path $downloadRoot "hnsep.zip") `
         -Destination (Join-Path $extractRoot "hnsep")
 
-    Write-Host "Preparing HNSEP source for ONNX conversion"
+    Write-Host "Preparing HNSEP model"
     $hnsepCandidates = @()
-    $hnsepCandidates += Get-ChildItem -Path (Join-Path $extractRoot "hnsep") -Recurse -File -Filter "model_fp16.pt"
     $hnsepCandidates += Get-ChildItem -Path (Join-Path $extractRoot "hnsep") -Recurse -File -Filter "model.pt"
     $hnsepModel = $hnsepCandidates | Sort-Object -Property Length -Descending | Select-Object -First 1
     if (-not $hnsepModel) {
-        throw "HNSEP model file not found after extraction. Expected model_fp16.pt or model.pt."
+        throw "HNSEP model file not found after extraction. Expected model.pt."
     }
     $hnsepSourceDir = Split-Path $hnsepModel.FullName -Parent
-    $hnsepWorkDir = Join-Path $repoRoot "hnsep\vr"
-    Reset-Directory $hnsepWorkDir
-    Copy-Item -Path (Join-Path $hnsepSourceDir "*") -Destination $hnsepWorkDir -Recurse -Force
-    if (-not (Test-Path (Join-Path $hnsepWorkDir "model_fp16.pt"))) {
-        Copy-Item -LiteralPath $hnsepModel.FullName -Destination (Join-Path $hnsepWorkDir "model_fp16.pt") -Force
-        Write-Host "Normalized HNSEP model to hnsep\vr\model_fp16.pt"
+    $hnsepConfig = Join-Path $hnsepSourceDir "config.yaml"
+    if (-not (Test-Path $hnsepConfig)) {
+        throw "HNSEP config.yaml not found next to model.pt."
     }
-
-    Write-Host "Converting HNSEP to ONNX"
-    uv run python .\hnsep\convert_hnsep_to_onnx.py --model-dir .\hnsep\vr --output .\hnsep\vr\model_fp16.onnx
 
     Write-Host "Assembling portable folder"
     Reset-Directory $stageRoot
@@ -203,7 +196,9 @@ try {
         -Destination (Join-Path $stageRoot "models\lofi_vocoder\model.onnx") `
         -PreferLargest
 
-    Copy-Item -LiteralPath ".\hnsep\vr\model_fp16.onnx" -Destination (Join-Path $stageRoot "models\hnsep\vr\model_fp16.onnx") -Force
+    New-Item -ItemType Directory -Force -Path (Join-Path $stageRoot "models\hnsep\vr") | Out-Null
+    Copy-Item -LiteralPath $hnsepModel.FullName -Destination (Join-Path $stageRoot "models\hnsep\vr\model.pt") -Force
+    Copy-Item -LiteralPath $hnsepConfig -Destination (Join-Path $stageRoot "models\hnsep\vr\config.yaml") -Force
 
     Write-Host "Preparing config in staged portable folder"
     & (Join-Path $stageRoot "runtime\python.exe") (Join-Path $stageRoot "manager\prepare_portable.py")

@@ -3,7 +3,7 @@ name: LoFiVocoder
 model:
   vocoder_path: "./models/lofi_vocoder/model.onnx"
   model_type: "onnx"
-  hnsep_model_path: "./models/hnsep/vr/model_fp16.onnx"
+  hnsep_model_path: "./models/hnsep/vr/model.pt"
 audio:
   sample_rate: 44100
   win_size: 2048
