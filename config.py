@@ -18,7 +18,7 @@ class Config:
     fill: int = 6
     vocoder_path: str = r"\path\to\your\vocoder\pc_nsf_hifigan\model.ckpt"
     model_type: str = 'ckpt'  # or 'onnx'
-    hnsep_model_path: str = r"\path\to\your\hnsep\model.pt"
+    hnsep_model_path: str = r"\path\to\your\hnsep\model.onnx"
     wave_norm: bool = False
     trim_silence: bool = True  # 是否在响度标准化前截取无声部分
     silence_threshold: float = -52.0
@@ -26,6 +26,8 @@ class Config:
     peak_limit: float = 1.0
     # max_workers can be an int or 'auto' (resolved to physical cores at runtime)
     max_workers: Any = 2
+    acceleration: str = "cpu"  # cpu or directml
+    directml_device_id: int = 0
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 CONFIG = Config()

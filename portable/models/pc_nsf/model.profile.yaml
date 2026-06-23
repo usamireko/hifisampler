@@ -1,9 +1,9 @@
 id: pc_nsf
 name: PC-NSF HiFiGAN
 model:
-  vocoder_path: "./models/pc_nsf_hifigan_44.1k_hop512_128bin_2025.02/model.onnx"
+  vocoder_path: "./models/pc_nsf/model.onnx"
   model_type: "onnx"
-  hnsep_model_path: "./models/hnsep/vr/model.pt"
+  hnsep_model_path: "./models/hnsep/vr/model.onnx"
 audio:
   sample_rate: 44100
   win_size: 2048
@@ -13,3 +13,7 @@ audio:
   n_mels: 128
   mel_fmin: 40
   mel_fmax: 16000
+runtime:
+  allowed_accelerations:
+    - "cpu"
+    - "directml"

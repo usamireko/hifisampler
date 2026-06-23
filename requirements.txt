@@ -6,7 +6,7 @@ torch
 librosa
 soundfile
 resampy
-onnxruntime
+onnxruntime-directml
 pyloudnorm
 tomli
 filelock

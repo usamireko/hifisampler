@@ -103,6 +103,36 @@ def check_onnxruntime() -> bool:
     return True
 
 
+def check_runtime(config: dict[str, Any]) -> bool:
+    runtime = config.get("runtime", {}) if isinstance(config.get("runtime"), dict) else {}
+    acceleration = str(runtime.get("acceleration", "cpu")).lower()
+    directml_device_id = runtime.get("directml_device_id", 0)
+
+    if acceleration == "cpu":
+        print("OK: acceleration mode: CPU")
+        return True
+
+    if acceleration != "directml":
+        print(f"ERROR: unknown acceleration mode: {acceleration}")
+        return False
+
+    try:
+        import onnxruntime as ort
+    except ImportError:
+        print("ERROR: DirectML requested but ONNXRuntime is not available")
+        return False
+
+    providers = ort.get_available_providers()
+    if "DmlExecutionProvider" not in providers:
+        print("ERROR: DirectML requested but DmlExecutionProvider is not available")
+        print(f"OK: selected DirectML device id: {directml_device_id}")
+        return False
+
+    print("OK: acceleration mode: DirectML")
+    print(f"OK: selected DirectML device id: {directml_device_id}")
+    return True
+
+
 def check_cuda(config: dict[str, Any]) -> bool:
     model = config.get("model", {}) if isinstance(config.get("model"), dict) else {}
     model_type = str(model.get("model_type", "onnx")).lower()
@@ -169,6 +199,7 @@ def main() -> int:
     checks_ok = status(find_file("hifiserver.py") is not None, "hifiserver.py found", "hifiserver.py missing") and checks_ok
     checks_ok = check_packages() and checks_ok
     checks_ok = check_onnxruntime() and checks_ok
+    checks_ok = check_runtime(config) and checks_ok
     checks_ok = check_cuda(config) and checks_ok
     checks_ok = check_models(config) and checks_ok
 

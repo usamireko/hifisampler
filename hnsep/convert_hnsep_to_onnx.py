@@ -5,17 +5,32 @@ Convert HN-SEP PyTorch model to ONNX format for inference optimization.
 
 import os
 import argparse
+import sys
 import torch
 import torch.nn as nn
 import yaml
 from pathlib import Path
 import logging
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from hnsep.nets import CascadedNet
-from util.audio import DotDict
 import onnx
 import onnxslim
 
 logging.basicConfig(format='%(message)s', level=logging.INFO)
+
+
+class DotDict(dict):
+    def __getattr__(*args):
+        val = dict.get(*args)
+        return DotDict(val) if type(val) is dict else val
+
+    __setattr__ = dict.__setitem__
+    __delattr__ = dict.__delitem__
+
 
 class OnnxCompatibleCascadedNet(nn.Module):
     """ONNX-compatible version of CascadedNet that handles complex numbers as separate real/imag channels"""

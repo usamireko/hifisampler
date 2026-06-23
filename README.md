@@ -9,7 +9,7 @@ This fork packages hifisampler as a user-friendly portable folder: no YAML editi
 Use the latest portable Windows CPU release:
 
 ```text
-hifisampler-portable-windows-cpu-<version>.zip
+hifisampler-portable-windows-<version>.zip
 ```
 
 The release package is intended to include:
@@ -33,7 +33,7 @@ runtime/
 
 ## Quick Start
 
-1. Download the latest `hifisampler-portable-windows-cpu-<version>.zip` from Releases.
+1. Download the latest `hifisampler-portable-windows-<version>.zip` from Releases.
 2. Extract it to a normal user-writable folder, such as `Documents\hifisampler`.
 3. Run `HifisamplerManager.exe`.
 4. Click `Prepare Portable`.
@@ -67,6 +67,16 @@ LoFiVocoder
 
 Use the model selector in `Hifisampler Manager`, then click `Apply Model`. If the server is running, restart it to apply the selected model.
 
+## Acceleration
+
+The manager can switch supported profiles between CPU and DirectML.
+
+```text
+PC-NSF HiFiGAN: CPU or DirectML
+LoFiVocoder: CPU only
+```
+
+When DirectML is selected, choose the GPU adapter from the device dropdown. 
 
 
 ## Manager Actions
@@ -77,7 +87,7 @@ Creates required folders, generates/updates `config.yaml`, normalizes paths, and
 
 `Check Environment`
 
-Checks Python, required packages, ONNXRuntime, CUDA status, model files, `hifisampler.exe`, `hifiserver.py`, and config.
+Checks Python, required packages, ONNXRuntime, CUDA status(not yet), model files, `hifisampler.exe`, `hifiserver.py`, and config.
 
 `Install to OpenUTAU`
 
@@ -133,9 +143,9 @@ Run `Install to OpenUTAU` again and make sure the selected folder is the OpenUTA
 
 The current portable release workflow is CPU-only. Large renders can be slow on CPU.
 
-### GPU Build
+### CUDA Build
 
-GPU builds should be released as separate assets later. They require compatible NVIDIA drivers and matching CUDA/PyTorch packages.
+CUDA builds should be released as separate assets later. They require compatible NVIDIA drivers and matching CUDA/PyTorch packages.
 
 ## Development
 

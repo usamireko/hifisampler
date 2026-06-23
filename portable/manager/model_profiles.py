@@ -22,6 +22,8 @@ CONFIG = PORTABLE_ROOT / "config.yaml"
 DEFAULT_CONFIG = PORTABLE_ROOT / "config.default.yaml"
 MODELS_DIR = PORTABLE_ROOT / "models"
 DEFAULT_PROFILE_ID = "pc_nsf"
+DEFAULT_ACCELERATION = "cpu"
+DEFAULT_DIRECTML_DEVICE_ID = 0
 
 
 @dataclass(frozen=True)
@@ -107,6 +109,7 @@ def apply_profile_to_config(config: dict[str, Any], profile: ModelProfile) -> di
     config.setdefault("portable", {})
     config.setdefault("model", {})
     config.setdefault("audio", {})
+    config.setdefault("runtime", {})
 
     if isinstance(config["portable"], dict):
         config["portable"]["active_model_profile"] = profile.profile_id
@@ -122,6 +125,13 @@ def apply_profile_to_config(config: dict[str, Any], profile: ModelProfile) -> di
     profile_audio = profile.data.get("audio", {})
     if isinstance(profile_audio, dict) and isinstance(config["audio"], dict):
         config["audio"].update(profile_audio)
+
+    if isinstance(config["runtime"], dict):
+        allowed = get_allowed_accelerations(profile)
+        current = str(config["runtime"].get("acceleration", DEFAULT_ACCELERATION)).lower()
+        if current not in allowed:
+            config["runtime"]["acceleration"] = DEFAULT_ACCELERATION
+        config["runtime"].setdefault("directml_device_id", DEFAULT_DIRECTML_DEVICE_ID)
 
     return config
 
@@ -151,11 +161,62 @@ def validate_profile(profile: ModelProfile) -> list[str]:
     return errors
 
 
+def get_allowed_accelerations(profile: ModelProfile) -> list[str]:
+    runtime = profile.data.get("runtime", {})
+    values = runtime.get("allowed_accelerations") if isinstance(runtime, dict) else None
+    if not isinstance(values, list):
+        return [DEFAULT_ACCELERATION]
+
+    allowed = []
+    for value in values:
+        normalized = str(value).lower()
+        if normalized in {"cpu", "directml"} and normalized not in allowed:
+            allowed.append(normalized)
+    return allowed or [DEFAULT_ACCELERATION]
+
+
+def get_runtime_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    config = config if config is not None else load_config()
+    runtime = config.get("runtime", {}) if isinstance(config.get("runtime"), dict) else {}
+    acceleration = str(runtime.get("acceleration", DEFAULT_ACCELERATION)).lower()
+    if acceleration not in {"cpu", "directml"}:
+        acceleration = DEFAULT_ACCELERATION
+
+    try:
+        directml_device_id = int(runtime.get("directml_device_id", DEFAULT_DIRECTML_DEVICE_ID))
+    except (TypeError, ValueError):
+        directml_device_id = DEFAULT_DIRECTML_DEVICE_ID
+
+    return {
+        "acceleration": acceleration,
+        "directml_device_id": max(0, directml_device_id),
+    }
+
+
+def set_runtime_config(acceleration: str, directml_device_id: int, profile_id: str | None = None) -> dict[str, Any]:
+    config = load_config()
+    profile = get_profile(profile_id or get_active_profile_id(config))
+    allowed = get_allowed_accelerations(profile)
+    acceleration = acceleration.lower()
+    if acceleration not in allowed:
+        raise RuntimeError(f"{profile.name} only supports: {', '.join(allowed)}")
+
+    config.setdefault("runtime", {})
+    if not isinstance(config["runtime"], dict):
+        config["runtime"] = {}
+    config["runtime"]["acceleration"] = acceleration
+    config["runtime"]["directml_device_id"] = max(0, int(directml_device_id))
+    dump_yaml(CONFIG, config)
+    return get_runtime_config(config)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Manage portable hifisampler model profiles.")
     parser.add_argument("--list", action="store_true", help="List available model profiles.")
     parser.add_argument("--active", action="store_true", help="Print the active model profile id.")
     parser.add_argument("--apply", metavar="PROFILE_ID", help="Apply a model profile to config.yaml.")
+    parser.add_argument("--set-runtime", choices=("cpu", "directml"), help="Set runtime acceleration.")
+    parser.add_argument("--directml-device-id", type=int, default=DEFAULT_DIRECTML_DEVICE_ID, help="DirectML adapter index.")
     parser.add_argument("--validate", action="store_true", help="Validate model files for all profiles.")
     args = parser.parse_args()
 
@@ -168,6 +229,10 @@ def main() -> int:
         if args.apply:
             profile = apply_profile(args.apply)
             print(f"OK: active model profile set to {profile.name}")
+        if args.set_runtime:
+            runtime = set_runtime_config(args.set_runtime, args.directml_device_id)
+            print(f"OK: acceleration set to {runtime['acceleration']}")
+            print(f"OK: DirectML device id: {runtime['directml_device_id']}")
         if args.validate:
             ok = True
             for profile in list_profiles():
@@ -183,7 +248,7 @@ def main() -> int:
         print(f"ERROR: {exc}")
         return 1
 
-    if not (args.list or args.active or args.apply or args.validate):
+    if not (args.list or args.active or args.apply or args.set_runtime or args.validate):
         parser.print_help()
     return 0
 

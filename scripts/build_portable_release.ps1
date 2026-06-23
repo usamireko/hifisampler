@@ -3,7 +3,7 @@ param(
     [string]$OutputRoot = "dist",
     [string]$PcNsfUrl = "https://github.com/openvpi/vocoders/releases/download/pc-nsf-hifigan-44.1k-hop512-128bin-2025.02/pc_nsf_hifigan_44.1k_hop512_128bin_2025.02.oudep",
     [string]$LoFiVocoderUrl = "https://huggingface.co/usamireko/LoFiVocoder/resolve/main/LoFiVocoder-20260203.zip",
-    [string]$HnsepUrl = "https://github.com/yxlllc/vocal-remover/releases/download/hnsep_240512/hnsep_240512.zip"
+    [string]$HnsepUrl = "https://huggingface.co/usamireko/hnsep_onnx/resolve/main/hnsep_onnx.zip"
 )
 
 $ErrorActionPreference = "Stop"
@@ -107,9 +107,9 @@ $repoRoot = Resolve-RepoRoot
 $buildRoot = Join-Path $repoRoot "build\portable-release"
 $downloadRoot = Join-Path $buildRoot "downloads"
 $extractRoot = Join-Path $buildRoot "extract"
-$stageRoot = Join-Path $buildRoot "hifisampler-portable-windows-cpu"
+$stageRoot = Join-Path $buildRoot "hifisampler-portable-windows"
 $outputRootFull = Join-Path $repoRoot $OutputRoot
-$zipPath = Join-Path $outputRootFull "hifisampler-portable-windows-cpu-$Version.zip"
+$zipPath = Join-Path $outputRootFull "hifisampler-portable-windows-$Version.zip"
 
 Reset-Directory $buildRoot
 New-Item -ItemType Directory -Force -Path $outputRootFull | Out-Null
@@ -158,19 +158,6 @@ try {
         -ZipPath (Join-Path $downloadRoot "hnsep.zip") `
         -Destination (Join-Path $extractRoot "hnsep")
 
-    Write-Host "Preparing HNSEP model"
-    $hnsepCandidates = @()
-    $hnsepCandidates += Get-ChildItem -Path (Join-Path $extractRoot "hnsep") -Recurse -File -Filter "model.pt"
-    $hnsepModel = $hnsepCandidates | Sort-Object -Property Length -Descending | Select-Object -First 1
-    if (-not $hnsepModel) {
-        throw "HNSEP model file not found after extraction. Expected model.pt."
-    }
-    $hnsepSourceDir = Split-Path $hnsepModel.FullName -Parent
-    $hnsepConfig = Join-Path $hnsepSourceDir "config.yaml"
-    if (-not (Test-Path $hnsepConfig)) {
-        throw "HNSEP config.yaml not found next to model.pt."
-    }
-
     Write-Host "Assembling portable folder"
     Reset-Directory $stageRoot
     Copy-DirectoryClean -Source (Join-Path $repoRoot "portable") -Destination $stageRoot
@@ -199,11 +186,13 @@ try {
     Assert-LastExitCode "runtime requirements install"
     & $runtimePython -c "import torch; print(f'Runtime torch: {torch.__version__}, cuda={torch.version.cuda}'); assert torch.version.cuda is None, 'Expected CPU-only torch in portable runtime'"
     Assert-LastExitCode "runtime torch validation"
+    & $runtimePython -c "import onnxruntime as ort; print('Runtime ONNX providers: ' + ', '.join(ort.get_available_providers())); assert 'DmlExecutionProvider' in ort.get_available_providers(), 'Expected DmlExecutionProvider in portable runtime'"
+    Assert-LastExitCode "runtime DirectML validation"
 
     Copy-FirstFile `
         -SearchRoot (Join-Path $extractRoot "pc_nsf") `
         -Patterns @("model.onnx", "*.onnx") `
-        -Destination (Join-Path $stageRoot "models\pc_nsf_hifigan_44.1k_hop512_128bin_2025.02\model.onnx") `
+        -Destination (Join-Path $stageRoot "models\pc_nsf\model.onnx") `
         -PreferLargest
 
     Copy-FirstFile `
@@ -212,9 +201,16 @@ try {
         -Destination (Join-Path $stageRoot "models\lofi_vocoder\model.onnx") `
         -PreferLargest
 
-    New-Item -ItemType Directory -Force -Path (Join-Path $stageRoot "models\hnsep\vr") | Out-Null
-    Copy-Item -LiteralPath $hnsepModel.FullName -Destination (Join-Path $stageRoot "models\hnsep\vr\model.pt") -Force
-    Copy-Item -LiteralPath $hnsepConfig -Destination (Join-Path $stageRoot "models\hnsep\vr\config.yaml") -Force
+    Copy-FirstFile `
+        -SearchRoot (Join-Path $extractRoot "hnsep") `
+        -Patterns @("model.onnx", "*.onnx") `
+        -Destination (Join-Path $stageRoot "models\hnsep\vr\model.onnx") `
+        -PreferLargest
+
+    Copy-FirstFile `
+        -SearchRoot (Join-Path $extractRoot "hnsep") `
+        -Patterns @("config.yaml") `
+        -Destination (Join-Path $stageRoot "models\hnsep\vr\config.yaml")
 
     Write-Host "Preparing config in staged portable folder"
     & (Join-Path $stageRoot "runtime\python.exe") (Join-Path $stageRoot "manager\prepare_portable.py")

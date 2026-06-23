@@ -1,4 +1,4 @@
-name: Build portable Windows CPU release
+name: Build portable Windows release
 
 on:
   workflow_dispatch:
@@ -47,11 +47,11 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hifisampler-portable-windows-cpu
-          path: dist/hifisampler-portable-windows-cpu-*.zip
+          name: hifisampler-portable-windows
+          path: dist/hifisampler-portable-windows-*.zip
 
       - name: Upload zip to GitHub Release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/hifisampler-portable-windows-cpu-*.zip
+          files: dist/hifisampler-portable-windows-*.zip

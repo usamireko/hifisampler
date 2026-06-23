@@ -10,28 +10,33 @@ def get_onnx_providers():
     import onnxruntime
     available_providers = onnxruntime.get_available_providers()
     preferred_providers = []
-    
-    if 'CUDAExecutionProvider' in available_providers:
-        preferred_providers.append('CUDAExecutionProvider')
-    elif 'DmlExecutionProvider' in available_providers:
+
+    acceleration = str(getattr(CONFIG, 'acceleration', 'cpu')).lower()
+    if acceleration == 'directml' and 'DmlExecutionProvider' in available_providers:
         preferred_providers.append('DmlExecutionProvider')
+    elif acceleration == 'directml':
+        logging.warning('DirectML was requested but DmlExecutionProvider is not available. Falling back to CPU.')
     preferred_providers.append('CPUExecutionProvider')
     
     return preferred_providers
 
 
-def create_optimized_session_options():
+def create_optimized_session_options(use_directml=False):
     """Create optimized ONNX session options for maximum performance"""
     import onnxruntime
     
     session_options = onnxruntime.SessionOptions()
     
-    # Performance optimizations
-    session_options.execution_mode = onnxruntime.ExecutionMode.ORT_PARALLEL
+    # DirectML requires sequential execution and disabled memory patterns.
+    if use_directml:
+        session_options.execution_mode = onnxruntime.ExecutionMode.ORT_SEQUENTIAL
+        session_options.enable_mem_pattern = False
+    else:
+        session_options.execution_mode = onnxruntime.ExecutionMode.ORT_PARALLEL
+        session_options.enable_mem_pattern = True
     session_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
     
     # Memory optimization
-    session_options.enable_mem_pattern = True
     session_options.enable_mem_reuse = True
     
     # CPU-specific optimizations
@@ -75,6 +80,14 @@ def get_cpu_provider_options():
     }
 
 
+def get_directml_provider_options():
+    """Get DirectML provider options."""
+    device_id = int(getattr(CONFIG, 'directml_device_id', 0) or 0)
+    return {
+        'device_id': str(max(0, device_id)),
+    }
+
+
 def resolve_model_path(configured_path, default_paths):
     """Resolve actual model path from configured path and defaults"""
     model_path = Path(configured_path)
@@ -98,6 +111,7 @@ class HifiGANLoader:
     
     def get_default_paths(self):
         return [
+            Path("models/pc_nsf/model.onnx"),
             Path("pc_nsf_hifigan_44.1k_hop512_128bin_2025.02/model.ckpt"),
             Path("pc_nsf_hifigan_44.1k_hop512_128bin_2025.02/model.onnx")
         ]
@@ -122,13 +136,15 @@ class HifiGANLoader:
         import onnxruntime
         
         preferred_providers = get_onnx_providers()
-        session_options = create_optimized_session_options()
+        session_options = create_optimized_session_options(use_directml='DmlExecutionProvider' in preferred_providers)
         
         # Configure providers with optimizations
         provider_options = []
         for provider in preferred_providers:
             if provider == 'CPUExecutionProvider':
                 provider_options.append(('CPUExecutionProvider', get_cpu_provider_options()))
+            elif provider == 'DmlExecutionProvider':
+                provider_options.append(('DmlExecutionProvider', get_directml_provider_options()))
             else:
                 provider_options.append((provider, {}))
         
@@ -204,13 +220,15 @@ class HNSEPLoader:
         args, args_dict = self.get_model_config(actual_path)
         
         preferred_providers = get_onnx_providers()
-        session_options = create_optimized_session_options()
+        session_options = create_optimized_session_options(use_directml='DmlExecutionProvider' in preferred_providers)
         
         # Configure providers with optimizations
         provider_options = []
         for provider in preferred_providers:
             if provider == 'CPUExecutionProvider':
                 provider_options.append(('CPUExecutionProvider', get_cpu_provider_options()))
+            elif provider == 'DmlExecutionProvider':
+                provider_options.append(('DmlExecutionProvider', get_directml_provider_options()))
             else:
                 provider_options.append((provider, {}))
         

@@ -6,9 +6,9 @@ env:
   conda_env_name: "hifisampler"
   python_script_path: "./hifiserver.py"
 model:
-  vocoder_path: "./models/pc_nsf_hifigan_44.1k_hop512_128bin_2025.02/model.onnx"
+  vocoder_path: "./models/pc_nsf/model.onnx"
   model_type: "onnx"
-  hnsep_model_path: "./models/hnsep/vr/model.pt"
+  hnsep_model_path: "./models/hnsep/vr/model.onnx"
 audio:
   sample_rate: 44100
   win_size: 2048
@@ -27,3 +27,6 @@ processing:
   fill: 6
 performance:
   max_workers: 2
+runtime:
+  acceleration: "cpu"
+  directml_device_id: 0

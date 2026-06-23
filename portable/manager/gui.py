@@ -10,7 +10,15 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
-from model_profiles import get_active_profile_id, list_profiles
+from model_profiles import (
+    get_active_profile_id,
+    get_allowed_accelerations,
+    get_profile,
+    get_runtime_config,
+    list_profiles,
+    load_config,
+    set_runtime_config,
+)
 
 
 if getattr(sys, "frozen", False):
@@ -57,6 +65,48 @@ def subprocess_startup_options() -> dict[str, object]:
     }
 
 
+def list_directml_devices() -> list[tuple[int, str]]:
+    if os.name != "nt":
+        return [(0, "0 - Default DirectML adapter")]
+
+    try:
+        import winreg
+    except Exception:
+        return [(0, "0 - Default DirectML adapter")]
+
+    devices: list[tuple[int, str]] = []
+    registry_path = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, registry_path) as display_class:
+            index = 0
+            while True:
+                try:
+                    subkey_name = winreg.EnumKey(display_class, index)
+                except OSError:
+                    break
+                index += 1
+                try:
+                    with winreg.OpenKey(display_class, subkey_name) as adapter_key:
+                        name, _kind = winreg.QueryValueEx(adapter_key, "DriverDesc")
+                except OSError:
+                    continue
+                if isinstance(name, str) and name.strip():
+                    devices.append((len(devices), f"{len(devices)} - {name.strip()}"))
+    except OSError:
+        return [(0, "0 - Default DirectML adapter")]
+
+    unique_devices: list[tuple[int, str]] = []
+    seen_names: set[str] = set()
+    for _device_id, label in devices:
+        name = label.split(" - ", 1)[1]
+        if name in seen_names:
+            continue
+        seen_names.add(name)
+        unique_devices.append((len(unique_devices), f"{len(unique_devices)} - {name}"))
+
+    return unique_devices or [(0, "0 - Default DirectML adapter")]
+
+
 class HifisamplerManager(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
@@ -77,9 +127,14 @@ class HifisamplerManager(ctk.CTk):
         self.server_var = tk.StringVar(value="Server: stopped")
         self.openutau_var = tk.StringVar()
         self.model_var = tk.StringVar(value="")
+        self.acceleration_var = tk.StringVar(value="CPU")
+        self.directml_device_var = tk.StringVar(value="")
         self.profile_name_to_id: dict[str, str] = {}
+        self.directml_device_name_to_id: dict[str, int] = {}
+        self.runtime_loading = False
 
         self._build_ui()
+        self.refresh_directml_devices()
         self.refresh_model_profiles()
         self._poll_output()
 
@@ -118,19 +173,41 @@ class HifisamplerManager(ctk.CTk):
 
         model_label = ctk.CTkLabel(actions, text="Model", anchor="w")
         model_label.grid(row=1, column=0, sticky="ew", padx=8, pady=6)
-        self.model_menu = ctk.CTkOptionMenu(actions, variable=self.model_var, values=["No profiles found"])
+        self.model_menu = ctk.CTkOptionMenu(
+            actions,
+            variable=self.model_var,
+            values=["No profiles found"],
+            command=lambda _value: self.refresh_runtime_controls(),
+        )
         self.model_menu.grid(row=1, column=1, columnspan=2, sticky="ew", padx=8, pady=6)
         self.apply_model_button.grid(row=1, column=3, sticky="ew", padx=8, pady=6)
 
-        self.install_button.grid(row=2, column=0, sticky="ew", padx=8, pady=6)
-        self.openutau_entry = ctk.CTkEntry(actions, textvariable=self.openutau_var, placeholder_text="OpenUTAU folder")
-        self.openutau_entry.grid(row=2, column=1, columnspan=2, sticky="ew", padx=8, pady=6)
-        self.browse_button = ctk.CTkButton(actions, text="Browse", command=self.browse_openutau)
-        self.browse_button.grid(row=2, column=3, sticky="ew", padx=8, pady=6)
+        acceleration_label = ctk.CTkLabel(actions, text="Acceleration", anchor="w")
+        acceleration_label.grid(row=2, column=0, sticky="ew", padx=8, pady=6)
+        self.acceleration_menu = ctk.CTkOptionMenu(
+            actions,
+            variable=self.acceleration_var,
+            values=["CPU", "DirectML"],
+            command=lambda _value: self.save_runtime_settings(),
+        )
+        self.acceleration_menu.grid(row=2, column=1, sticky="ew", padx=8, pady=6)
+        self.directml_device_menu = ctk.CTkOptionMenu(
+            actions,
+            variable=self.directml_device_var,
+            values=["0 - Default DirectML adapter"],
+            command=lambda _value: self.save_runtime_settings(),
+        )
+        self.directml_device_menu.grid(row=2, column=2, columnspan=2, sticky="ew", padx=8, pady=6)
 
-        self.open_logs_button.grid(row=3, column=0, sticky="ew", padx=8, pady=(6, 10))
-        self.open_log_button.grid(row=3, column=1, sticky="ew", padx=8, pady=(6, 10))
-        self.clear_button.grid(row=3, column=2, sticky="ew", padx=8, pady=(6, 10))
+        self.install_button.grid(row=3, column=0, sticky="ew", padx=8, pady=6)
+        self.openutau_entry = ctk.CTkEntry(actions, textvariable=self.openutau_var, placeholder_text="OpenUTAU folder")
+        self.openutau_entry.grid(row=3, column=1, columnspan=2, sticky="ew", padx=8, pady=6)
+        self.browse_button = ctk.CTkButton(actions, text="Browse", command=self.browse_openutau)
+        self.browse_button.grid(row=3, column=3, sticky="ew", padx=8, pady=6)
+
+        self.open_logs_button.grid(row=4, column=0, sticky="ew", padx=8, pady=(6, 10))
+        self.open_log_button.grid(row=4, column=1, sticky="ew", padx=8, pady=(6, 10))
+        self.clear_button.grid(row=4, column=2, sticky="ew", padx=8, pady=(6, 10))
 
         output_panel = ctk.CTkFrame(self, corner_radius=8)
         output_panel.grid(row=2, column=0, sticky="nsew", padx=20, pady=8)
@@ -165,6 +242,7 @@ class HifisamplerManager(ctk.CTk):
         self.install_button.configure(state=state)
         self.browse_button.configure(state=state)
         self.apply_model_button.configure(state=state)
+        self.refresh_runtime_controls()
 
     def run_task(self, script_name: str, args: list[str] | None = None, after=None) -> None:
         if self.task_running:
@@ -240,6 +318,7 @@ class HifisamplerManager(ctk.CTk):
 
     def refresh_model_profiles(self) -> None:
         try:
+            self.runtime_loading = True
             profiles = list_profiles()
             self.profile_name_to_id = {profile.name: profile.profile_id for profile in profiles}
             names = list(self.profile_name_to_id)
@@ -247,6 +326,8 @@ class HifisamplerManager(ctk.CTk):
                 self.model_menu.configure(values=["No profiles found"])
                 self.model_var.set("No profiles found")
                 self.apply_model_button.configure(state=tk.DISABLED)
+                self.acceleration_menu.configure(state=tk.DISABLED)
+                self.directml_device_menu.configure(state=tk.DISABLED)
                 return
 
             self.model_menu.configure(values=names)
@@ -254,11 +335,97 @@ class HifisamplerManager(ctk.CTk):
             active_name = next((profile.name for profile in profiles if profile.profile_id == active_profile_id), names[0])
             self.model_var.set(active_name)
             self.apply_model_button.configure(state=tk.NORMAL)
+            self.refresh_runtime_controls()
         except Exception as exc:
             self.model_menu.configure(values=["Profile error"])
             self.model_var.set("Profile error")
             self.apply_model_button.configure(state=tk.DISABLED)
             self.append_line(f"ERROR: failed to load model profiles: {exc}")
+        finally:
+            self.runtime_loading = False
+
+    def refresh_directml_devices(self) -> None:
+        devices = list_directml_devices()
+        self.directml_device_name_to_id = {name: device_id for device_id, name in devices}
+        names = list(self.directml_device_name_to_id)
+        self.directml_device_menu.configure(values=names)
+        if names:
+            self.directml_device_var.set(names[0])
+
+    def refresh_runtime_controls(self) -> None:
+        if not hasattr(self, "acceleration_menu"):
+            return
+
+        profile_id = self.profile_name_to_id.get(self.model_var.get())
+        if not profile_id:
+            self.acceleration_menu.configure(state=tk.DISABLED)
+            self.directml_device_menu.configure(state=tk.DISABLED)
+            return
+
+        try:
+            profile = get_profile(profile_id)
+            allowed = get_allowed_accelerations(profile)
+            runtime = get_runtime_config(load_config())
+        except Exception as exc:
+            self.append_line(f"ERROR: failed to load runtime settings: {exc}")
+            self.acceleration_menu.configure(state=tk.DISABLED)
+            self.directml_device_menu.configure(state=tk.DISABLED)
+            return
+
+        acceleration_values = ["CPU"]
+        if "directml" in allowed:
+            acceleration_values.append("DirectML")
+        self.acceleration_menu.configure(values=acceleration_values)
+
+        current_acceleration = runtime["acceleration"]
+        if current_acceleration not in allowed:
+            current_acceleration = "cpu"
+        self.acceleration_var.set("DirectML" if current_acceleration == "directml" else "CPU")
+
+        selected_device_id = runtime["directml_device_id"]
+        selected_device_name = next(
+            (name for name, device_id in self.directml_device_name_to_id.items() if device_id == selected_device_id),
+            next(iter(self.directml_device_name_to_id), "0 - Default DirectML adapter"),
+        )
+        self.directml_device_var.set(selected_device_name)
+
+        if self.task_running:
+            state = tk.DISABLED
+        else:
+            state = tk.NORMAL
+        self.acceleration_menu.configure(state=state if len(acceleration_values) > 1 else tk.DISABLED)
+        self.directml_device_menu.configure(
+            state=state if current_acceleration == "directml" and "directml" in allowed else tk.DISABLED
+        )
+
+    def save_runtime_settings(self) -> None:
+        if self.runtime_loading:
+            return
+
+        profile_id = self.profile_name_to_id.get(self.model_var.get())
+        if not profile_id:
+            return
+
+        try:
+            profile = get_profile(profile_id)
+            allowed = get_allowed_accelerations(profile)
+            acceleration = "directml" if self.acceleration_var.get() == "DirectML" else "cpu"
+            if acceleration not in allowed:
+                acceleration = "cpu"
+                self.acceleration_var.set("CPU")
+
+            device_id = self.directml_device_name_to_id.get(self.directml_device_var.get(), 0)
+            runtime = set_runtime_config(acceleration, device_id, profile_id=profile_id)
+            self.status_var.set(
+                f"Acceleration: {runtime['acceleration']}"
+                + (f" on DirectML device {runtime['directml_device_id']}" if runtime["acceleration"] == "directml" else "")
+            )
+            if self.server_process is not None:
+                self.append_line("> Acceleration change will apply after restarting the server")
+        except Exception as exc:
+            messagebox.showerror("Acceleration", str(exc))
+        finally:
+            self.refresh_runtime_controls()
 
     def apply_model_profile(self) -> None:
         profile_name = self.model_var.get()
