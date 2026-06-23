@@ -1,0 +1,15 @@
+id: lofi_vocoder
+name: LoFiVocoder
+model:
+  vocoder_path: "./models/lofi_vocoder/model.onnx"
+  model_type: "onnx"
+  hnsep_model_path: "./models/hnsep/vr/model_fp16.onnx"
+audio:
+  sample_rate: 44100
+  win_size: 2048
+  hop_size: 512
+  origin_hop_size: 128
+  n_fft: 2048
+  n_mels: 128
+  mel_fmin: 40
+  mel_fmax: 16000
