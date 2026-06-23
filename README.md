@@ -4,9 +4,9 @@ Portable Windows fork of hifisampler focused on simple OpenUTAU setup.
 
 This fork packages hifisampler as a user-friendly portable folder: no YAML editing, no symbolic links, no admin permissions, and clear errors when something is missing.
 
-## What You Download
+## Starting
 
-Use the latest portable Windows CPU release:
+Use the latest portable Windows release:
 
 ```text
 hifisampler-portable-windows-<version>.zip
@@ -63,6 +63,22 @@ Included profiles:
 ```text
 PC-NSF HiFiGAN
 LoFiVocoder
+```
+
+Expected model layout:
+
+```text
+models/
+  pc_nsf/
+    model.profile.yaml
+    model.onnx
+  lofi_vocoder/
+    model.profile.yaml
+    model.onnx
+  hnsep/
+    vr/
+      model.onnx
+      config.yaml
 ```
 
 Use the model selector in `Hifisampler Manager`, then click `Apply Model`. If the server is running, restart it to apply the selected model.
@@ -133,15 +149,15 @@ Click `Check Environment`. Missing model files are reported as:
 ERROR: model file missing: ...
 ```
 
-For release zips, models should already be included. For development builds, place models under `models/` using the normalized paths listed above.
+For release zips, models should already be included. For development builds, place models under `models/` using the expected model layout above.
 
 ### OpenUTAU Cannot See The Resampler
 
 Run `Install to OpenUTAU` again and make sure the selected folder is the OpenUTAU folder that contains or should contain `Resamplers\`.
 
-### CPU Is Slow
+### Slow Speed
 
-The current portable release workflow is CPU-only. Large renders can be slow on CPU.
+Check if you are using CPU, switch to DirectML and pick your best GPU.
 
 ### CUDA Build
 
