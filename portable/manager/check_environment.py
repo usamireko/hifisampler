@@ -18,7 +18,6 @@ PACKAGE_IMPORTS = {
     "scipy": "scipy",
     "pyyaml": "yaml",
     "pathlib": "pathlib",
-    "torch": "torch",
     "librosa": "librosa",
     "soundfile": "soundfile",
     "resampy": "resampy",

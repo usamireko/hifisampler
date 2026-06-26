@@ -2,11 +2,10 @@ numpy
 scipy
 pyyaml
 pathlib
-torch
 librosa
 soundfile
 resampy
-onnxruntime-directml
+onnxruntime
 pyloudnorm
 tomli
 filelock

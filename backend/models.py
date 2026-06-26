@@ -18,8 +18,8 @@ def initialize_models():
     
     logging.info("Initializing models...")
 
-    hifigan_loader = HifiGANLoader(CONFIG.vocoder_path, CONFIG.device)
-    hnsep_loader = HNSEPLoader(CONFIG.hnsep_model_path, CONFIG.device)
+    hifigan_loader = HifiGANLoader(CONFIG.vocoder_path)
+    hnsep_loader = HNSEPLoader(CONFIG.hnsep_model_path)
     
     vocoder_result = hifigan_loader.load_model()
     model_or_session, vocoder_type = vocoder_result

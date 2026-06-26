@@ -1,6 +1,5 @@
 import logging
 import numpy as np
-import torch
 import scipy.interpolate as interp
 from pathlib import Path
 
@@ -11,7 +10,8 @@ from util.audio import dynamic_range_compression_torch, loudness_norm, pre_empha
 from util.parse_utau import flag_re, midi_to_hz, note_to_midi, pitch_string_to_cents
 from util.cache_manager import cache_manager
 
-cache_ext = '.hifi.npz'  # cache file extension
+cache_ext = '.hifi.npz'
+
 
 class Resampler:
     def __init__(self, in_file, out_file, pitch, velocity, flags='', offset=0, length=1000, consonant=0, cutoff=0, volume=100, modulation=0, tempo='!100', pitch_string='AA'):
@@ -79,30 +79,29 @@ class Resampler:
 
     def generate_features(self, features_path):
         wave = read_wav(self.in_file)
-        wave = torch.from_numpy(wave).to(
-            dtype=torch.float32, device=CONFIG.device).unsqueeze(0).unsqueeze(0)
+        wave = wave.astype(np.float32).reshape(1, 1, -1)
         logging.info(wave.shape)
 
         breath = self.flags.get("Hb", 100)
         voicing = self.flags.get("Hv", 100)
         tension = self.flags.get("Ht", 0)
         logging.info(f'breath: {breath}, voicing: {voicing}, tension: {tension}')
-        
+
         if self._needs_hnsep_separation(breath, voicing, tension):
             logging.info('Hb, Hv, or Ht flag requires hnsep separation. Split audio into breath, voicing')
 
             hnsep_cache_path = self.in_file.with_name(
                 f'{self.in_file.stem}_hnsep')
-            
-            force_generate = 'G' in self.flags.keys()
-            # 缓存优先
 
-            seg_output = cache_manager.load_hnsep_cache(hnsep_cache_path, str(CONFIG.device), force_generate)
-            
+            force_generate = 'G' in self.flags.keys()
+
+            seg_output = cache_manager.load_hnsep_cache(
+                hnsep_cache_path, 'cpu', force_generate)
+
             if seg_output is None:
                 logging.info(f'Generating hnsep features for {hnsep_cache_path}')
-                with torch.inference_mode():
-                    seg_output = models.hnsep_model.predict_fromaudio(wave)
+                seg_output = _numpy_inference_mode(
+                    models.hnsep_model.predict_fromaudio, wave)
                 seg_output = cache_manager.save_hnsep_cache(hnsep_cache_path, seg_output)
 
             breath = np.clip(breath, 0, 500)
@@ -116,19 +115,17 @@ class Resampler:
                 wave = (breath/100)*(wave - seg_output) + \
                     (voicing/100)*seg_output
         elif breath != 100 or voicing != 100:
-            # 当 breath == voicing 且不等于 100 时，应用简单缩放优化
             logging.info(f'Hb == Hv ({breath}), applying optimized simple scaling instead of hnsep separation')
             wave = self._apply_simple_scaling(wave, breath)
-        wave = wave.squeeze(0).squeeze(0).cpu().numpy()
-        wave = torch.from_numpy(wave).to(
-            dtype=torch.float32, device=CONFIG.device).unsqueeze(0)  # 默认不缩放
-        wave_max = torch.max(torch.abs(wave))
+
+        wave = wave.squeeze().astype(np.float32).reshape(1, -1)
+
+        wave_max = np.max(np.abs(wave))
         if wave_max >= 0.5:
             logging.info('The audio volume is too high. Scaling down to 0.5')
-            # 先缩小到最大0.5
             scale = 0.5 / wave_max
             wave = wave * scale
-            scale = scale.item()
+            scale = float(scale)
         else:
             logging.info('The audio volume is already low enough')
             scale = 1.0
@@ -141,7 +138,7 @@ class Resampler:
             wave,
             gender/100, 1).squeeze()
         logging.info(f'mel_origin: {mel_origin.shape}')
-        mel_origin = dynamic_range_compression_torch(mel_origin).cpu().numpy()
+        mel_origin = dynamic_range_compression_torch(mel_origin)
         logging.info('Features generation completed.')
 
         features = {'mel_origin': mel_origin, 'scale': scale}
@@ -177,16 +174,16 @@ class Resampler:
         logging.info(f"total_time: {total_time}")
 
         vel = np.exp2(1 - self.velocity / 100)
-        offset = self.offset / 1000  # start time
-        cutoff = self.cutoff / 1000  # end time
+        offset = self.offset / 1000
+        cutoff = self.cutoff / 1000
         start = offset
         logging.info(f'vel:{vel}')
         logging.info(f'offset:{offset}')
         logging.info(f'cutoff:{cutoff}')
 
         logging.info('Calculating timing.')
-        if self.cutoff < 0:  # deal with relative end time
-            end = start - cutoff  # ???
+        if self.cutoff < 0:
+            end = start - cutoff
         else:
             end = total_time - cutoff
         con = start + self.consonant / 1000
@@ -202,7 +199,6 @@ class Resampler:
         logging.info(f'stretch_length: {stretch_length}')
 
         if CONFIG.loop_mode or "He" in self.flags.keys():
-            # 添加循环拼接模式
             logging.info('Looping.')
             logging.info(
                 f'con_mel_frame: {int((con + thop_origin/2)//thop_origin)}')
@@ -212,7 +208,7 @@ class Resampler:
             pad_loop_size = length_req//thop_origin + 1
             logging.info(f'pad_loop_size: {pad_loop_size}')
             padded_mel = np.pad(mel_loop, pad_width=(
-                (0, 0), (0, int(pad_loop_size))), mode='reflect')  # 多pad一点
+                (0, 0), (0, int(pad_loop_size))), mode='reflect')
             logging.info(f'padded_mel: {padded_mel.shape}')
             mel_origin = np.concatenate(
                 (mel_origin[:, :int((con + thop_origin/2)//thop_origin)], padded_mel), axis=1)
@@ -223,7 +219,6 @@ class Resampler:
             total_time = t_area_origin[-1] + thop_origin/2
             logging.info(f'new_total_time: {total_time}')
 
-        # Make interpolators to render new areas
         mel_interp = interp.interp1d(t_area_origin, mel_origin, axis=1)
 
         if stretch_length < length_req:
@@ -242,7 +237,6 @@ class Resampler:
         logging.info(f'stretched_n_frames: {stretched_n_frames}')
         logging.info(f'stretched_t_mel: {stretched_t_mel.shape}')
 
-        # 在start左边的mel帧数
         start_left_mel_frames = (start*vel + thop/2)//thop
         if start_left_mel_frames > CONFIG.fill:
             cut_left_mel_frames = start_left_mel_frames - CONFIG.fill
@@ -251,7 +245,6 @@ class Resampler:
         logging.info(f'start_left_mel_frames: {start_left_mel_frames}')
         logging.info(f'cut_left_mel_frames: {cut_left_mel_frames}')
 
-        # 在length_req+con右边的mel帧数
         end_right_mel_frames = stretched_n_frames - \
             (length_req+con*vel + thop/2)//thop
         if end_right_mel_frames > CONFIG.fill:
@@ -260,11 +253,6 @@ class Resampler:
             cut_right_mel_frames = 0
         logging.info(f'end_right_mel_frames: {end_right_mel_frames}')
         logging.info(f'cut_right_mel_frames: {cut_right_mel_frames}')
-
-        logging.info(f'length_req: {length_req}')
-        logging.info(f'stretch_length: {stretch_length}')
-        logging.info(
-            f'(length_req+con*vel + thop/2)//thop: {(length_req+con*vel + thop/2)//thop}')
 
         stretched_t_mel = stretched_t_mel[int(cut_left_mel_frames):int(
             stretched_n_frames-cut_right_mel_frames)]
@@ -278,8 +266,6 @@ class Resampler:
         new_end = (length_req+con*vel) - cut_left_mel_frames * thop
         logging.info(f'new_start: {new_start}')
         logging.info(f'new_end: {new_end}')
-        logging.info(f'stretched_t_mel[0]: {stretched_t_mel[0]}')
-        logging.info(f'stretched_t_mel[-1]: {stretched_t_mel[-1]}')
 
         mel_render = mel_interp(stretch_t_mel)
         logging.info(f'mel_render: {mel_render.shape}')
@@ -287,7 +273,6 @@ class Resampler:
         t = np.arange(mel_render.shape[1]) * thop
         logging.info(f't: {t.shape}')
         logging.info('Calculating pitch.')
-        # Calculate pitch in MIDI note number terms
         pitch = self.pitchbend / 100 + self.pitch
         if "t" in self.flags.keys() and self.flags["t"]:
             pitch = pitch + self.flags["t"] / 100
@@ -300,56 +285,32 @@ class Resampler:
         logging.info('Cutting mel and f0.')
 
         if CONFIG.model_type == "ckpt":
-
-            mel_render = torch.from_numpy(
-                mel_render).unsqueeze(0).to(dtype=torch.float32)
-            f0_render = torch.from_numpy(f0_render).unsqueeze(
-                0).to(dtype=torch.float32)
-            logging.info(f'mel_render: {mel_render.shape}')
-            logging.info(f'f0_render: {f0_render.shape}')
+            mel_render_t = np.expand_dims(mel_render, 0).astype(np.float32)
+            f0_render_t = np.expand_dims(f0_render, 0).astype(np.float32)
 
             logging.info('Rendering audio.')
 
-            with torch.inference_mode():
-                wav_con = models.vocoder.spec2wav_torch(mel_render.to(
-                    CONFIG.device), f0=f0_render.to(CONFIG.device))
-            render = wav_con[int(new_start * CONFIG.sample_rate):int(new_end * CONFIG.sample_rate)].to('cpu').numpy()
-            logging.info(f'cut_l:{int(new_start * CONFIG.sample_rate)}')
-            logging.info(
-                f'cut_r:{len(wav_con)-int(new_end * CONFIG.sample_rate)}')
-            logging.info(
-                f'mel_l:{(int(new_start * CONFIG.sample_rate)+256)//CONFIG.hop_size}')
-            logging.info(
-                f'mel_r:{(len(wav_con)-int(new_end * CONFIG.sample_rate)+256)//CONFIG.hop_size}')
+            wav_con = _vocoder_inference(mel_render_t, f0=f0_render_t)
+            render = wav_con[int(new_start * CONFIG.sample_rate):int(new_end * CONFIG.sample_rate)]
 
-            logging.info(f'wav_con: {wav_con.shape}')
-            logging.info(f'render: {render.shape}')
         elif CONFIG.model_type == "onnx":
             logging.info('Rendering audio.')
             f0 = f0_render.astype(np.float32)
             mel = mel_render.astype(np.float32)
-            # 给mel和f0添加batched维度
             mel = np.expand_dims(mel, axis=0).transpose(0, 2, 1)
             f0 = np.expand_dims(f0, axis=0)
-            input_data = {'mel': mel, 'f0': f0, }
+            input_data = {'mel': mel, 'f0': f0}
             output = models.ort_session.run(['waveform'], input_data)[0]
             wav_con = output[0]
 
             render = wav_con[int(new_start * CONFIG.sample_rate):int(new_end * CONFIG.sample_rate)]
-            logging.info(f'cut_l:{int(new_start * CONFIG.sample_rate)}')
-            logging.info(
-                f'cut_r:{len(wav_con)-int(new_end * CONFIG.sample_rate)}')
-            logging.info(
-                f'mel_l:{(int(new_start * CONFIG.sample_rate)+256)//CONFIG.hop_size}')
-            logging.info(
-                f'mel_r:{(len(wav_con)-int(new_end * CONFIG.sample_rate)+256)//CONFIG.hop_size}')
-
-            logging.info(f'wav_con: {wav_con.shape}')
-            logging.info(f'render: {render.shape}')
         else:
             raise ValueError(f"Unsupported model type: {CONFIG.model_type}")
 
-        # 添加幅度调制
+        logging.info(f'wav_con: {wav_con.shape}')
+        logging.info(f'render: {render.shape}')
+
+        # Amplitude modulation
         A_flag = self.flags.get('A', 0)
         if A_flag != 0:
             logging.info(f'Applying Amplitude Modulation A={A_flag}')
@@ -364,11 +325,10 @@ class Resampler:
                     new_start, new_end, num=num_samples, endpoint=False)
 
                 interpolated_gain = np.interp(audio_time_vector,
-                                              t,  # Time points for gain_at_mel_frames
+                                              t,
                                               gain_at_mel_frames,
-                                              # Value for time < t[0]
                                               left=gain_at_mel_frames[0],
-                                              right=gain_at_mel_frames[-1])  # Value for time > t[-1]
+                                              right=gain_at_mel_frames[-1])
 
                 render = render * interpolated_gain
                 logging.info('Amplitude modulation applied.')
@@ -385,7 +345,6 @@ class Resampler:
                 render = growl(
                     render, CONFIG.sample_rate, frequency=80.0, strength=hg_strength/100)
 
-        # normalize using loudness_norm
         if CONFIG.wave_norm:
             if "P" in self.flags.keys():
                 p_strength = self.flags['P']
@@ -403,3 +362,24 @@ class Resampler:
         render = render * volume_scale
 
         save_wav(self.out_file, render)
+
+
+def _numpy_inference_mode(fn, *args, **kwargs):
+    return fn(*args, **kwargs)
+
+
+def _vocoder_inference(mel, f0=None):
+    if CONFIG.model_type == 'ckpt':
+        try:
+            import torch
+        except ImportError:
+            raise ImportError(
+                "PyTorch required for ckpt vocoder. Use model_type='onnx' or install torch."
+            )
+        with torch.inference_mode():
+            mel_t = torch.from_numpy(mel).float()
+            f0_t = torch.from_numpy(f0).float() if f0 is not None else None
+            result = models.vocoder.spec2wav_torch(mel_t, f0=f0_t)
+            return result.cpu().numpy()
+    else:
+        raise RuntimeError("Unexpected model_type in _vocoder_inference")

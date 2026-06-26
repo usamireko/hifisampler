@@ -2,7 +2,6 @@ import logging
 from pathlib import Path
 import numpy as np
 import resampy
-import torch
 from config import CONFIG
 import soundfile as sf
 
@@ -13,7 +12,7 @@ if CONFIG.wave_norm:
     except ImportError:
         logging.warning(
             "pyloudnorm not found, wave normalization disabled.")
-        CONFIG.wave_norm = False  # Disable if import fails
+        CONFIG.wave_norm = False
 
 
 class DotDict(dict):
@@ -26,7 +25,7 @@ class DotDict(dict):
 
 
 def dynamic_range_compression_torch(x, C=1, clip_val=1e-9):
-    return torch.log(torch.clamp(x, min=clip_val) * C)
+    return np.log(np.maximum(x, clip_val) * C)
 
 
 def loudness_norm(
@@ -48,19 +47,19 @@ def loudness_norm(
     """
 
     original_length = len(audio)
-    original_audio = audio.copy()  # 保存原始音频用于后续处理
+    original_audio = audio.copy()
 
     if CONFIG.trim_silence:
         def get_rms_db(audio_segment):
             if len(audio_segment) == 0:
                 return -np.inf
             rms = np.sqrt(np.mean(np.square(audio_segment)))
-            if rms < 1e-10:  # 避免log(0)错误
+            if rms < 1e-10:
                 return -np.inf
             return 20 * np.log10(rms)
 
-        frame_length = int(rate * 0.02)  # 20ms窗口
-        hop_length = int(rate * 0.01)    # 10ms步长
+        frame_length = int(rate * 0.02)
+        hop_length = int(rate * 0.01)
 
         rms_values = []
         for i in range(0, len(audio) - frame_length, hop_length):
@@ -68,7 +67,6 @@ def loudness_norm(
             rms_db = get_rms_db(frame)
             rms_values.append(rms_db)
 
-        # 使用阈值检测有声帧
         voiced_frames = [i for i, rms in enumerate(
             rms_values) if rms > CONFIG.silence_threshold]
 
@@ -76,10 +74,8 @@ def loudness_norm(
             first_voiced = voiced_frames[0]
             last_voiced = voiced_frames[-1]
 
-            # 添加一些余量，避免突然截断
-            padding_frames = int(rate * 0.1) // hop_length  # 添加100ms的余量
+            padding_frames = int(rate * 0.1) // hop_length
 
-            # 确保不超出边界
             start_sample = max(0, first_voiced * hop_length)
             end_sample = min(len(audio), (last_voiced + 1 +
                              padding_frames) * hop_length + frame_length)
@@ -88,49 +84,35 @@ def loudness_norm(
             logging.info(
                 f'Trimmed silence: {len(audio)} -> {len(trimmed_audio)} samples')
 
-            # 使用截取后的音频进行响度标准化
             audio = trimmed_audio
 
-    # 如果音频长度小于最小块大小，进行填充
     if len(audio) < int(rate * block_size):
         padding_length = int(rate * block_size) - len(audio)
         audio = np.pad(audio, (0, padding_length), mode='reflect')
 
-    # Measure the loudness first
-    meter = pyln.Meter(rate, block_size=block_size)  # create BS.1770 meter
+    meter = pyln.Meter(rate, block_size=block_size)
     _loudness = meter.integrated_loudness(audio)
 
-    # Apply strength to calculate the target loudness
     final_loudness = _loudness + (loudness - _loudness) * strength / 100
 
-    # Loudness normalize audio to [loudness] LUFS
     audio = pyln.normalize.loudness(audio, _loudness, final_loudness)
 
-    # 如果启用了无声截取功能，需要恢复原始长度
     if CONFIG.trim_silence:
-        # 创建一个全零数组作为输出
         output = np.zeros(original_length)
 
-        # 将标准化后的音频放回原位置，并添加平滑过渡
-        if voiced_frames:  # 确保有声音帧存在
+        if voiced_frames:
             start_sample = max(0, first_voiced * int(hop_length))
 
-            # 计算需要放回的音频长度
             available_length = min(len(audio), original_length - start_sample)
 
-            # 创建一个逐渐衰减的窗函数，用于音频的尾部淡出
-            # 最多200ms或音频长度的1/4
             fade_length = min(int(rate * 0.2), available_length // 4)
             fade_out = np.ones(available_length)
 
             if fade_length > 0:
-                # 在末尾应用淡出效果
                 fade_out[-fade_length:] = np.linspace(1.0, 0.0, fade_length)
 
-            # 应用淡出效果并放回原位置
             output[start_sample:start_sample +
                    available_length] = audio[:available_length] * fade_out
-            # 如果原始音频有后续部分，应用交叉淡入淡出
             if start_sample + available_length < original_length:
                 remain_length = original_length - \
                     (start_sample + available_length)
@@ -138,81 +120,95 @@ def loudness_norm(
 
                 if crossfade_length > 0:
                     crossfade_start = start_sample + available_length
-                    # 从原始音频获取剩余部分
                     remain_audio = original_audio[crossfade_start:original_length]
 
-                    # 应用淡入效果到原始音频的剩余部分
                     fade_in = np.ones(remain_length)
                     fade_in[:crossfade_length] = np.linspace(
                         0.0, 1.0, crossfade_length)
 
-                    # 填充剩余部分
                     output[crossfade_start:original_length] = remain_audio * fade_in
-        else:  # 如果没有声音帧，直接返回原始音频
+        else:
             output = audio[:original_length]
 
         audio = output
 
-    # 如果原始音频短于block_size，裁剪回原始长度
     if original_length < int(rate * block_size):
         audio = audio[:original_length]
 
     return audio
 
+
 def pre_emphasis_base_tension(wave, b):
     """
+    Apply pre-emphasis with base tension using numpy STFT/iSTFT.
+
     Args:
-        wave: [1, 1, t]
+        wave: ndarray [1, 1, t] or [1, t]
+        b: float, tension coefficient
     """
-    original_length = wave.size(-1)
+    from util.stft_numpy import stft_numpy, istft_numpy, _periodic_hann
+
+    wave = np.asarray(wave, dtype=np.float32)
+
+    original_length = wave.shape[-1]
     pad_length = (CONFIG.hop_size - (original_length %
                   CONFIG.hop_size)) % CONFIG.hop_size
-    wave = torch.nn.functional.pad(
-        wave, (0, pad_length), mode='constant', value=0)
-    wave = wave.squeeze(1)
+    wave = np.pad(wave, ((0, 0), (0, pad_length)), mode='constant')
 
-    spec = torch.stft(
+    if wave.ndim == 3:
+        wave = wave.reshape(wave.shape[1], wave.shape[2])  # [1, t]
+    elif wave.ndim == 2 and wave.shape[0] == 1:
+        wave = wave[0]
+
+    hann_win = _periodic_hann(CONFIG.win_size)
+
+    spec = stft_numpy(
         wave,
-        CONFIG.n_fft,
-        hop_length=CONFIG.hop_size,
-        win_length=CONFIG.win_size,
-        window=torch.hann_window(CONFIG.win_size).to(wave.device),
-        return_complex=True
-    )
-    spec_amp = torch.abs(spec)
-    spec_phase = torch.atan2(spec.imag, spec.real)
-
-    spec_amp_db = torch.log(torch.clamp(spec_amp, min=1e-9))
-
-    fft_bin = CONFIG.n_fft // 2 + 1
-    x0 = fft_bin / ((CONFIG.sample_rate / 2) / 1500)
-    freq_filter = (-b / x0) * torch.arange(0, fft_bin, device=wave.device) + b
-    spec_amp_db = spec_amp_db + \
-        torch.clamp(freq_filter, min=-2, max=2).unsqueeze(0).unsqueeze(2)
-
-    spec_amp = torch.exp(spec_amp_db)
-
-    filtered_wave = torch.istft(
-        torch.complex(spec_amp * torch.cos(spec_phase),
-                      spec_amp * torch.sin(spec_phase)),
         n_fft=CONFIG.n_fft,
         hop_length=CONFIG.hop_size,
         win_length=CONFIG.win_size,
-        window=torch.hann_window(CONFIG.win_size).to(wave.device)
+        window=hann_win,
+        center=True,
+    )
+    spec_amp = np.abs(spec)
+    spec_phase = np.arctan2(spec.imag, spec.real)
+
+    spec_amp_db = np.log(np.maximum(spec_amp, 1e-9))
+
+    fft_bin = CONFIG.n_fft // 2 + 1
+    x0 = fft_bin / ((CONFIG.sample_rate / 2) / 1500)
+    freq_filter = (-b / x0) * np.arange(fft_bin, dtype=np.float32) + b
+    freq_filter = np.clip(freq_filter, -2, 2)
+    spec_amp_db = spec_amp_db + freq_filter[:, np.newaxis]
+
+    spec_amp = np.exp(spec_amp_db)
+
+    # Reconstruct complex spec
+    spec_filtered = spec_amp * (np.cos(spec_phase) + 1j * np.sin(spec_phase))
+
+    filtered_wave = istft_numpy(
+        spec_filtered,
+        n_fft=CONFIG.n_fft,
+        hop_length=CONFIG.hop_size,
+        win_length=CONFIG.win_size,
+        window=hann_win,
+        center=True,
     )
 
-    original_max = torch.max(torch.abs(wave))
-    filtered_max = torch.max(torch.abs(filtered_wave))
-    filtered_wave = filtered_wave * \
-        (original_max / filtered_max) * (np.clip(b/(-15), 0, 0.33) + 1)
-    filtered_wave = filtered_wave.unsqueeze(1)
-    filtered_wave = filtered_wave[:, :, :original_length]
+    original_max = np.max(np.abs(wave))
+    filtered_max = np.max(np.abs(filtered_wave))
+    if filtered_max > 1e-10:
+        filtered_wave = filtered_wave * \
+            (original_max / filtered_max) * (np.clip(b/(-15), 0, 0.33) + 1)
 
-    return filtered_wave
+    filtered_wave = filtered_wave[:original_length]
+
+    return filtered_wave.reshape(1, 1, -1)
 
 
 def read_wav(loc):
-    """Read audio files supported by soundfile and resample to 44.1kHz if needed. Mixes down to mono if needed.
+    """Read audio files supported by soundfile and resample to 44.1kHz if needed.
+    Mixes down to mono if needed.
 
     Parameters
     ----------
@@ -224,11 +220,11 @@ def read_wav(loc):
     ndarray
         Data read from WAV file remapped to [-1, 1] and in 44.1kHz
     """
-    if type(loc) is str:  # make sure input is Path
+    if type(loc) is str:
         loc = Path(loc)
 
     exists = loc.exists()
-    if not exists:  # check for alternative files
+    if not exists:
         for ext in sf.available_formats().keys():
             loc = loc.with_suffix('.' + ext.lower())
             exists = loc.exists()
@@ -240,7 +236,6 @@ def read_wav(loc):
 
     x, fs = sf.read(str(loc))
     if len(x.shape) == 2:
-        # Average all channels... Probably not too good for formats bigger than stereo
         x = np.mean(x, axis=1)
 
     if fs != CONFIG.sample_rate:

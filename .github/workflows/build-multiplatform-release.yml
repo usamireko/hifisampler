@@ -1,0 +1,73 @@
+name: Build multiplatform release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label for the generated package."
+        required: false
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - os: windows
+            runner: windows-latest
+            setup-python-version: "3.10"
+          - os: linux
+            runner: ubuntu-latest
+            setup-python-version: "3.10"
+          - os: macos
+            runner: macos-latest
+            setup-python-version: "3.10"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.setup-python-version }}
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build release
+        shell: bash
+        run: |
+          version="${{ inputs.version }}"
+          if [ -z "$version" ]; then
+            version="${{ github.ref_name }}"
+          fi
+          python3 scripts/build_release.py \
+            --version "$version" \
+            --os "${{ matrix.os }}" \
+            --output-dir dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hifisampler-portable-${{ matrix.os }}
+          path: dist/hifisampler-portable-${{ matrix.os }}-*
+
+      - name: Upload to GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/hifisampler-portable-${{ matrix.os }}-*

@@ -1,13 +1,8 @@
-# 从SingingVocoders项目复制
-# https://github.com/openvpi/SingingVocoders/blob/main/utils/wav2mel.py
+# Forked from SingingVocoders, numpy backend (no torch).
 
 import numpy as np
-import torch
-import torch.nn.functional as F
-import torch.utils.data
-
 from librosa.filters import mel as librosa_mel_fn
-# from loguru import logger
+from util.stft_numpy import stft_numpy, _periodic_hann
 
 
 class PitchAdjustableMelSpectrogram:
@@ -35,12 +30,29 @@ class PitchAdjustableMelSpectrogram:
         self.hann_window = {}
 
     def __call__(self, y, key_shift=0, speed=1.0):
+        """Compute mel spectrogram from audio.
+
+        Parameters
+        ----------
+        y : ndarray, shape (batch, samples) or (samples,)
+            Audio waveform.
+        key_shift : float
+            Pitch shift in semitones.
+        speed : float
+            Speed factor.
+        """
+        y = np.asarray(y, dtype=np.float32)
+        was_1d = y.ndim == 1
+        if was_1d:
+            y = y.reshape(1, -1)
+
         factor = 2 ** (key_shift / 12)
         n_fft_new = int(np.round(self.n_fft * factor))
         win_size_new = int(np.round(self.win_size * factor))
         hop_length = int(np.round(self.hop_length * speed))
 
-        mel_basis_key = f"{self.f_max}_{y.device}"
+        # Cache mel basis (keyed by f_max only, no device tracking needed)
+        mel_basis_key = str(self.f_max)
         if mel_basis_key not in self.mel_basis:
             mel = librosa_mel_fn(
                 sr=self.sample_rate,
@@ -49,76 +61,56 @@ class PitchAdjustableMelSpectrogram:
                 fmin=self.f_min,
                 fmax=self.f_max,
             )
-            self.mel_basis[mel_basis_key] = torch.from_numpy(mel).float().to(y.device)
+            self.mel_basis[mel_basis_key] = mel.astype(np.float32)
 
-        hann_window_key = f"{key_shift}_{y.device}"
+        # Cache hann window (keyed by key_shift / resulting win_size)
+        hann_window_key = str(key_shift)
         if hann_window_key not in self.hann_window:
-            self.hann_window[hann_window_key] = torch.hann_window(
-                win_size_new, device=y.device
-            )
+            self.hann_window[hann_window_key] = _periodic_hann(win_size_new)
 
-        y = torch.nn.functional.pad(
-            y.unsqueeze(1),
-            (
-                int((win_size_new - hop_length) // 2),
-                int((win_size_new - hop_length+1) // 2),
-            ),
-            mode="reflect",
-        )
-        y = y.squeeze(1)
+        # Pad with reflect mode (matching torch)
+        pad_left = int((win_size_new - hop_length) // 2)
+        pad_right = int((win_size_new - hop_length + 1) // 2)
+        y_padded = np.pad(y, ((0, 0), (pad_left, pad_right)), mode='reflect')
 
-        spec = torch.stft(
-            y,
-            n_fft_new,
+        # STFT
+        spec = stft_numpy(
+            y_padded if was_1d else y_padded,
+            n_fft=n_fft_new,
             hop_length=hop_length,
             win_length=win_size_new,
             window=self.hann_window[hann_window_key],
-            center=self.center,
-            pad_mode="reflect",
+            center=False,  # we padded manually
+            pad_mode='reflect',
             normalized=False,
             onesided=True,
             return_complex=True,
-        ).abs()
-        # spec = torch.view_as_real(spec)
-        # spec = torch.sqrt(spec.pow(2).sum(-1) + (1e-9))
+        )
+        if was_1d:
+            spec = spec[np.newaxis, ...]
+
+        spec = np.abs(spec)
 
         if key_shift != 0:
             size = self.n_fft // 2 + 1
-            resize = spec.size(1)
+            resize = spec.shape[1]
             if resize < size:
-                spec = F.pad(spec, (0, 0, 0, size - resize))
+                spec = np.pad(spec, ((0, 0), (0, size - resize), (0, 0)))
+            spec = spec[:, :size, :] * (self.win_size / win_size_new)
 
-            spec = spec[:, :size, :] * self.win_size / win_size_new
+        # Mel projection: (n_mels, n_freq) @ (batch, n_freq, n_frames) → (batch, n_mels, n_frames)
+        mel = self.mel_basis[mel_basis_key]
+        spec = mel @ spec
 
-        spec = torch.matmul(self.mel_basis[mel_basis_key], spec)
+        return spec.squeeze(0) if was_1d else spec
 
-        return spec
+    def dynamic_range_compression_torch(self, x, C=1, clip_val=1e-5):
+        return np.log(np.maximum(x, clip_val) * C)
 
-    def dynamic_range_compression_torch(self,x, C=1, clip_val=1e-5):
-        return torch.log(torch.clamp(x, min=clip_val) * C)
 
-if __name__=='__main__':
+if __name__ == '__main__':
     import glob
-    import torchaudio
     from tqdm import tqdm
-    # from concurrent.futures import ProcessPoolExecutor
-    # import random
 
-    # import re
-    # from torch.multiprocessing import Manager, Process, current_process, get_context
-    #
-    # is_main_process = not bool(re.match(r'((.*Process)|(SyncManager)|(.*PoolWorker))-\d+', current_process().name))
-
-
-    lll = glob.glob(r'D:\propj\Disa\data\opencpop\raw\wavs/**.wav')
-    torch.set_num_threads(1)
-
-    for i in tqdm(lll):
-        audio, sr = torchaudio.load(i)
-        audio = torch.clamp(audio[0], -1.0, 1.0)
-
-        mel_spec_transform=PitchAdjustableMelSpectrogram()
-        with torch.inference_mode():
-            spectrogram = mel_spec_transform(audio.unsqueeze(0).cuda())*0.434294
-            # spectrogram = 20 * torch.log10(torch.clamp(spectrogram, min=1e-5)) - 20  #ds 是log10
-            # spectrogram = torch.log(torch.clamp(spectrogram, min=1e-5))
+    # Legacy test runner, kept for reference. torch removed.
+    print("wav2mel module loaded (numpy backend). Use PitchAdjustableMelSpectrogram class.")
