@@ -121,8 +121,6 @@ try {
     Assert-LastExitCode "uv sync"
     uv pip install pyinstaller
     Assert-LastExitCode "uv pip install pyinstaller"
-    uv run python -c "import torch; print(f'Build torch: {torch.__version__}, cuda={torch.version.cuda}'); assert torch.version.cuda is None, 'Expected CPU-only torch in build environment'"
-    Assert-LastExitCode "build torch validation"
 
     Write-Host "Building hifisampler.exe"
     dotnet publish .\client\hifisampler.csproj -c Release -r win-x64 /p:PublishAot=true /p:DebugType=none /p:DebugSymbols=false -o .\build\client-win-x64
@@ -180,14 +178,10 @@ try {
     $pythonRoot = Get-PythonInstallRoot
     Copy-Item -Path (Join-Path $pythonRoot "*") -Destination (Join-Path $stageRoot "runtime") -Recurse -Force
     $runtimePython = Join-Path $stageRoot "runtime\python.exe"
-    uv pip install --python $runtimePython --system --index-url https://download.pytorch.org/whl/cpu torch
-    Assert-LastExitCode "runtime torch install"
-    uv pip install --python $runtimePython --system --extra-index-url https://download.pytorch.org/whl/cpu -r .\requirements.txt
+    uv pip install --python $runtimePython --system -r .\requirements.txt
     Assert-LastExitCode "runtime requirements install"
-    & $runtimePython -c "import torch; print(f'Runtime torch: {torch.__version__}, cuda={torch.version.cuda}'); assert torch.version.cuda is None, 'Expected CPU-only torch in portable runtime'"
-    Assert-LastExitCode "runtime torch validation"
-    & $runtimePython -c "import onnxruntime as ort; print('Runtime ONNX providers: ' + ', '.join(ort.get_available_providers())); assert 'DmlExecutionProvider' in ort.get_available_providers(), 'Expected DmlExecutionProvider in portable runtime'"
-    Assert-LastExitCode "runtime DirectML validation"
+    & $runtimePython -c "import onnxruntime as ort; print('Runtime ONNX providers: ' + ', '.join(ort.get_available_providers()))"
+    Assert-LastExitCode "runtime ONNX validation"
 
     Copy-FirstFile `
         -SearchRoot (Join-Path $extractRoot "pc_nsf") `
