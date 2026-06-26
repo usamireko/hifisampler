@@ -194,7 +194,8 @@ def main() -> int:
     checks_ok = status(CONFIG.exists(), "config.yaml found", f"config.yaml missing: {CONFIG}") and checks_ok
 
     config = load_config()
-    checks_ok = status(find_file("hifisampler.exe") is not None, "hifisampler.exe found", "hifisampler.exe missing") and checks_ok
+    client_name = "hifisampler.exe" if sys.platform == "win32" else "hifisampler"
+    checks_ok = status(find_file(client_name) is not None, f"{client_name} found", f"{client_name} missing") and checks_ok
     checks_ok = status(find_file("hifiserver.py") is not None, "hifiserver.py found", "hifiserver.py missing") and checks_ok
     checks_ok = check_packages() and checks_ok
     checks_ok = check_onnxruntime() and checks_ok

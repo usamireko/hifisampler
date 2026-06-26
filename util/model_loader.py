@@ -19,6 +19,13 @@ def get_onnx_providers():
             'DirectML was requested but DmlExecutionProvider is not available. '
             'Falling back to CPU.'
         )
+    elif acceleration == 'coreml' and 'CoreMLExecutionProvider' in available_providers:
+        preferred_providers.append('CoreMLExecutionProvider')
+    elif acceleration == 'coreml':
+        logging.warning(
+            'CoreML was requested but CoreMLExecutionProvider is not available. '
+            'Falling back to CPU.'
+        )
     preferred_providers.append('CPUExecutionProvider')
 
     return preferred_providers
