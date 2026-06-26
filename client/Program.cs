@@ -378,25 +378,37 @@ class Program
         }
     }
 
-    // --- Server Launcher (Revised for VISIBLE Window) ---
+    // --- Server Launcher ---
     static void LaunchServerLauncher(string launcherScriptPath)
     {
         if (string.IsNullOrEmpty(launcherScriptPath) || !File.Exists(launcherScriptPath))
         {
             throw new FileNotFoundException("Launcher script path invalid.", launcherScriptPath);
         }
-        Console.WriteLine($"[LaunchServerLauncher] Attempting launch (visible window): '{launcherScriptPath}'");
-        string command, arguments;
+        Console.WriteLine($"[LaunchServerLauncher] Launching server: '{launcherScriptPath}'");
         string workingDir = Path.GetDirectoryName(launcherScriptPath) ?? ".";
-        bool useShellExecute = false;
         try
         {
             if (OperatingSystem.IsWindows())
             {
-                command = "cmd.exe";
-                arguments = $"/C start \"HifiSampler Server\" /D \"{workingDir}\" cmd /C \"title HifiSampler Server & echo Starting server... & \"{launcherScriptPath}\" & echo. & echo Server process finished. & pause\"";
-                useShellExecute = false;
-                Process.Start(new ProcessStartInfo { FileName = command, Arguments = arguments, WorkingDirectory = workingDir, UseShellExecute = useShellExecute, CreateNoWindow = true });
+                // Run silently, no terminal window
+                string pythonExe = Path.Combine(workingDir, "runtime", "python.exe");
+                string serverScript = Path.Combine(workingDir, "hifiserver.py");
+                string logDir = Path.Combine(workingDir, "logs");
+                Directory.CreateDirectory(logDir);
+                string logFile = Path.Combine(logDir, "server.log");
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = pythonExe,
+                    Arguments = $"\"{serverScript}\"",
+                    WorkingDirectory = workingDir,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                });
+                Console.WriteLine("[LaunchServerLauncher] Server started (background, no window).");
             }
             else if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
             {

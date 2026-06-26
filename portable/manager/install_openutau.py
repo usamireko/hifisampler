@@ -7,10 +7,11 @@ from pathlib import Path
 
 
 PORTABLE_ROOT = Path(__file__).resolve().parents[1]
+CLIENT_NAME = "hifisampler.exe" if sys.platform == "win32" else "hifisampler"
 
 
-def find_hifisampler_exe() -> Path | None:
-    for candidate in (PORTABLE_ROOT / "hifisampler.exe", PORTABLE_ROOT.parent / "hifisampler.exe"):
+def find_hifisampler() -> Path | None:
+    for candidate in (PORTABLE_ROOT / CLIENT_NAME, PORTABLE_ROOT.parent / CLIENT_NAME):
         if candidate.exists():
             return candidate
     return None
@@ -35,25 +36,25 @@ def validate_openutau_folder(path: Path) -> Path:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Copy hifisampler.exe into OpenUTAU Resamplers.")
+    parser = argparse.ArgumentParser(description=f"Copy {CLIENT_NAME} into OpenUTAU Resamplers.")
     parser.add_argument("openutau_folder", nargs="?", help="Path to the OpenUTAU folder.")
     args = parser.parse_args()
 
-    source = find_hifisampler_exe()
+    source = find_hifisampler()
     if source is None:
-        print("ERROR: hifisampler.exe was not found in the portable folder or parent folder.")
+        print(f"ERROR: {CLIENT_NAME} was not found in the portable folder or parent folder.")
         return 1
 
     try:
         openutau_folder = Path(args.openutau_folder).expanduser() if args.openutau_folder else prompt_openutau_path()
         resamplers = validate_openutau_folder(openutau_folder)
-        destination = resamplers / "hifisampler.exe"
+        destination = resamplers / CLIENT_NAME
         shutil.copy2(source, destination)
     except Exception as exc:
         print(f"ERROR: install failed: {exc}")
         return 1
 
-    print("OK: hifisampler.exe installed")
+    print(f"OK: {CLIENT_NAME} installed")
     print(f"Installed to: {destination}")
     return 0
 

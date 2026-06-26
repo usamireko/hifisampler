@@ -1,231 +1,177 @@
 # hifisampler
 
-Portable Windows fork of hifisampler focused on simple OpenUTAU setup.
+Portable multiplatform fork of hifisampler focused on simple setup with ONNX inference.
 
-This fork packages hifisampler as a user-friendly portable folder: no YAML editing, no symbolic links, no admin permissions, and clear errors when something is missing.
+No PyTorch required. No YAML editing. No admin permissions. Clear errors when something is missing.
 
-## Starting
+## Supported Platforms
 
-Use the latest portable Windows release:
-
-```text
-hifisampler-portable-windows-<version>.zip
-```
-
-The release package is intended to include:
-
-```text
-HifisamplerManager.exe
-hifisampler.exe
-hifiserver.py
-config.yaml
-config.default.yaml
-backend/
-util/
-hnsep/
-manager/
-models/
-logs/
-runtime/
-```
-
-`HifisamplerManager.exe` is the main app. The `.bat` files are kept as fallback/debug tools.
+| Platform | CPU | GPU |
+|---|---|---|
+| Windows | Y | DirectML |
+| Linux | Yes | - |
+| macOS (Apple Silicon) | Y | CoreML |
 
 ## Quick Start
 
-1. Download the latest `hifisampler-portable-windows-<version>.zip` from Releases.
-2. Extract it to a normal user-writable folder, such as `Documents\hifisampler`.
-3. Run `HifisamplerManager.exe`.
-4. Click `Prepare Portable`.
-5. Choose a model profile if needed.
-6. Click `Install to OpenUTAU`.
-7. Click `Start Server`.
-8. Open OpenUTAU.
-9. Select `hifisampler` as the resampler.
+### Windows
 
-No admin permissions are required.
+1. Download `hifisampler-portable-windows-<version>.zip` from Releases.
+2. Extract to a user-writable folder, e.g. `Documents\hifisampler`.
+3. Run `HifisamplerManager.exe`, click `Prepare Portable`, then `Start Server`.
+4. Click `Install to OpenUTAU`.
 
-## OpenUTAU Setup
+### Linux
 
-The manager copies `hifisampler.exe` into:
+1. Download `hifisampler-portable-linux-<version>.tar.gz` from Releases.
+2. Extract: `tar xzf hifisampler-portable-linux-*.tar.gz`
+3. Run `./HifisamplerManager`, click `Prepare Portable`, then `Start Server`.
+4. Click `Install to OpenUTAU`.
 
-```text
-<OpenUTAU folder>\Resamplers\hifisampler.exe
+### macOS
+
+1. Download `hifisampler-portable-macos-<version>.tar.gz` from Releases.
+2. Extract: `tar xzf hifisampler-portable-macos-*.tar.gz`
+3. Run `./HifisamplerManager`, click `Prepare Portable`, then `Start Server`.
+4. Click `Install to OpenUTAU`.
+
+No admin permissions are required on any platform.
+
+## Package Layout
+
 ```
-
-It creates `Resamplers\` if missing. 
-## Model Profiles
-
-The manager can switch models without manual config editing.
-
-Included profiles:
-
-```text
-PC-NSF HiFiGAN
-LoFiVocoder
+hifisampler-portable-{os}-<version>/
+├── hifisampler{ext}          
+├── HifisamplerManager{ext}   
+├── hifiserver.py            
+├── config.py backend/ util/ hnsep/  
+├── runtime/                  
+├── models/
+│   ├── pc_nsf/model.onnx
+│   ├── lofi_vocoder/model.onnx
+│   └── hnsep/vr/model.onnx + config.yaml
+├── start.{bat,sh}           
+├── prepare_portable.{bat,sh}
+├── check_environment.{bat,sh}
+├── config.yaml
+└── README.md
 ```
-
-Expected model layout:
-
-```text
-models/
-  pc_nsf/
-    model.profile.yaml
-    model.onnx
-  lofi_vocoder/
-    model.profile.yaml
-    model.onnx
-  hnsep/
-    vr/
-      model.onnx
-      config.yaml
-```
-
-Use the model selector in `Hifisampler Manager`, then click `Apply Model`. If the server is running, restart it to apply the selected model.
 
 ## Acceleration
 
-The manager can switch supported profiles between CPU and DirectML.
+Set `acceleration` in `config.yaml` or via the manager GUI:
 
-```text
-PC-NSF HiFiGAN: CPU or DirectML
-LoFiVocoder: CPU only
-```
+| Platform | Options |
+|---|---|
+| Windows | `cpu`, `directml` |
+| Linux | `cpu` |
+| macOS | `cpu`, `coreml` |
 
-When DirectML is selected, choose the GPU adapter from the device dropdown. 
+When DirectML is selected, choose the GPU adapter from the device dropdown.
 
+## Dependencies
 
-## Manager Actions
-
-`Prepare Portable`
-
-Creates required folders, generates/updates `config.yaml`, normalizes paths, and applies the selected model profile.
-
-`Check Environment`
-
-Checks Python, required packages, ONNXRuntime, CUDA status(not yet), model files, `hifisampler.exe`, `hifiserver.py`, and config.
-
-`Install to OpenUTAU`
-
-Copies `hifisampler.exe` into OpenUTAU's `Resamplers` folder.
-
-`Start Server`
-
-Starts `hifiserver.py` using the bundled runtime when available. Server output is shown in the manager and written to `logs/server.log`.
-
-## Fallback Scripts
-
-These scripts are included for troubleshooting:
-
-```text
-START_HIFISAMPLER.bat
-PREPARE_PORTABLE.bat
-INSTALL_TO_OPENUTAU.bat
-CHECK_ENVIRONMENT.bat
-REPAIR_CONFIG.bat
-```
-
-Normally, users should run `HifisamplerManager.exe`.
-
-## Troubleshooting
-
-### Server Does Not Start
-
-Open `HifisamplerManager.exe` and click `Check Environment`. Also check:
-
-```text
-logs/server.log
-```
-
-### Python Runtime Missing
-
-Use the full portable release package. Development checkouts can fall back to system Python, but release users should not need to install Python manually.
-
-### Model Missing
-
-Click `Check Environment`. Missing model files are reported as:
-
-```text
-ERROR: model file missing: ...
-```
-
-For release zips, models should already be included. For development builds, place models under `models/` using the expected model layout above.
-
-### OpenUTAU Cannot See The Resampler
-
-Run `Install to OpenUTAU` again and make sure the selected folder is the OpenUTAU folder that contains or should contain `Resamplers\`.
-
-### Slow Speed
-
-Check if you are using CPU, switch to DirectML and pick your best GPU.
-
-### CUDA Build
-
-CUDA builds should be released as separate assets later. They require compatible NVIDIA drivers and matching CUDA/PyTorch packages.
-
-## Development
-
-Install dependencies with UV:
+The portable releases bundle everything. For development:
 
 ```bash
+# Core deps (CPU inference, all platforms)
 uv sync
+
+# Windows GPU (DirectML)
+uv sync --extra directml
+
+# Optional: PyTorch for ckpt/pt model loading
+uv sync --extra torch
 ```
 
 Run the server from a development checkout:
 
 ```bash
-uv run hifiserver.py
+uv run python hifiserver.py
 ```
 
-Run the manager from a development checkout:
+Run the manager:
 
 ```bash
 uv run python portable/manager/gui.py
 ```
 
-Build a portable release locally on Windows:
+## Build Releases
 
-```powershell
-.\scripts\build_portable_release.ps1 -Version dev
+```bash
+# Windows
+python3 scripts/build_release.py --os windows --version dev
+
+# Linux
+python3 scripts/build_release.py --os linux --version dev
+
+# macOS
+python3 scripts/build_release.py --os macos --version dev
 ```
 
-The full GitHub release workflow is documented in:
+The multiplatform CI workflow runs on every `v*` tag. See `docs/RELEASING.md`.
 
-```text
-docs/RELEASING.md
+## Fallback Scripts
+
+For troubleshooting without the GUI:
+
+```
+Windows: START_HIFISAMPLER.bat  PREPARE_PORTABLE.bat  CHECK_ENVIRONMENT.bat
+Linux/macOS: start.sh  prepare_portable.sh  check_environment.sh
 ```
 
+## OpenUTAU Setup
+
+Use the `Install to OpenUTAU` button in the manager. It copies the client binary into `<OpenUTAU folder>/Resamplers/` and creates the folder if missing.
+
+## Model Profiles
+
+```
+PC-NSF HiFiGAN (CPU or DirectML)
+LoFiVocoder (CPU only)
+```
+
+Expected model layout:
+
+```
+models/
+  pc_nsf/model.onnx
+  lofi_vocoder/model.onnx
+  hnsep/vr/model.onnx + config.yaml
+```
+
+## Troubleshooting
+
+### Server Does Not Start
+
+Run `Check Environment` and check `logs/server.log`.
+
+### Model Missing
+
+Run `Check Environment`. Release packages include models; dev builds need them placed manually.
+
+### Slow Speed
+
+Check acceleration setting. Switch to DirectML (Windows) or CoreML (macOS) if available.
 
 ## Implemented Flags
 
-- **g:** Adjust gender/formants.
-  - Range: `-600` to `600` | Default: `0`
-- **Hb:** Adjust breath/noise.
-  - Range: `0` to `500` | Default: `100`
-- **Hv:** Adjust voice/harmonic.
-  - Range: `0` to `150` | Default: `100`
-- **HG:** Vocal fry/growl.
-  - Range: `0` to `100` | Default: `0`
-- **P:** Normalize loudness at the note level, targeting -16 LUFS. Enable this with `wave_norm: true` in `config.yaml`.
-  - Range: `0` to `100` | Default: `100`
-- **t:** Shift pitch in cents. 1 cent = 1/100 of a semitone.
-  - Range: `-1200` to `1200` | Default: `0`
-- **Ht:** Adjust tension.
-  - Range: `-100` to `100` | Default: `0`
-- **A:** Modulate amplitude based on pitch variations.
-  - Range: `-100` to `100` | Default: `0`
-- **G:** Force feature cache regeneration.
-  - No value needed
-- **He:** Enable Mel spectrum loop mode.
-  - No value needed
+- **g:** Adjust gender/formants. Range: -600 to 600, default: 0
+- **Hb:** Adjust breath/noise. Range: 0 to 500, default: 100
+- **Hv:** Adjust voice/harmonic. Range: 0 to 150, default: 100
+- **HG:** Vocal fry/growl. Range: 0 to 100, default: 0
+- **P:** Normalize loudness at note level (-16 LUFS). Requires `wave_norm: true` in config. Range: 0 to 100, default: 100
+- **t:** Shift pitch in cents. Range: -1200 to 1200, default: 0
+- **Ht:** Adjust tension. Range: -100 to 100, default: 0
+- **A:** Modulate amplitude based on pitch variations. Range: -100 to 100, default: 0
+- **G:** Force feature cache regeneration. No value needed
+- **He:** Enable Mel spectrum loop mode. No value needed
 
-The flags `B` and `V` were renamed to `Hb` and `Hv` because they conflict with other UTAU flags.
+Flags `B` and `V` were renamed to `Hb` and `Hv` to avoid conflicts with other UTAU flags.
 
 ## Credits
 
 This fork is based on hifisampler, which was modified from [straycatresampler](https://github.com/UtaUtaUtau/straycat), replacing WORLD with pc-nsf-hifigan.
-
-Acknowledgments from the original project:
 
 - [yjzxkxdn](https://github.com/yjzxkxdn)
 - [openvpi](https://github.com/openvpi) for pc-nsf-hifigan
