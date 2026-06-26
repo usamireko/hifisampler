@@ -180,7 +180,9 @@ try {
     $runtimePython = Join-Path $stageRoot "runtime\python.exe"
     uv pip install --python $runtimePython --system -r .\requirements.txt
     Assert-LastExitCode "runtime requirements install"
-    & $runtimePython -c "import onnxruntime as ort; print('Runtime ONNX providers: ' + ', '.join(ort.get_available_providers()))"
+    uv pip install --python $runtimePython --system onnxruntime-directml>=1.22.0
+    Assert-LastExitCode "runtime directml install"
+    & $runtimePython -c "import onnxruntime as ort; print('Runtime ONNX providers: ' + ', '.join(ort.get_available_providers())); assert 'DmlExecutionProvider' in ort.get_available_providers(), 'Expected DmlExecutionProvider'"
     Assert-LastExitCode "runtime ONNX validation"
 
     Copy-FirstFile `

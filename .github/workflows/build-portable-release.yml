@@ -7,9 +7,7 @@ on:
         description: "Version label for the generated zip. Defaults to the branch/tag name."
         required: false
         type: string
-  push:
-    tags:
-      - "v*"
+  # Tag builds now use build-multiplatform-release.yml instead.
 
 permissions:
   contents: write

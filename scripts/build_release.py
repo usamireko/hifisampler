@@ -184,6 +184,13 @@ def build(args):
         "-r", str(repo / "requirements.txt"),
     ], cwd=repo)
 
+    if args.os == "windows":
+        run([
+            "uv", "pip", "install",
+            "--python", str(runtime_python),
+            "onnxruntime-directml>=1.22.0",
+        ], cwd=repo)
+
     models_dir = stage / "models"
     models_dir.mkdir(exist_ok=True)
 
