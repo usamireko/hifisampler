@@ -210,11 +210,11 @@ def build(args):
     shutil.copy2(hnsep_config_src, hnsep_out / "config.yaml")
 
     print("  Running prepare_portable.py...")
-    run([str(runtime_python), str(stage / "manager" / "prepare_portable.py")],
+    run([str(runtime_python.resolve()), str((stage / "manager" / "prepare_portable.py").resolve())],
         cwd=stage)
 
     print("  Running check_environment.py...")
-    run([str(runtime_python), str(stage / "manager" / "check_environment.py")],
+    run([str(runtime_python.resolve()), str((stage / "manager" / "check_environment.py").resolve())],
         cwd=stage)
 
     print(f"\n[7/7] Packaging as {platform['package']}...")
