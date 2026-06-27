@@ -31,7 +31,7 @@ PLATFORM_CONFIG = {
         "package": "zip",
         "client_name": "hifisampler.exe",
         "manager_name": "HifisamplerManager.exe",
-        "runtime_paths": ["Scripts/python.exe", "python.exe"],
+        "runtime_paths": ["python.exe", "Scripts/python.exe"],
         "python_bin": "python.exe",
     },
     "linux": {
@@ -91,6 +91,54 @@ def find_file(search_root, patterns):
     return max(files, key=lambda f: f.stat().st_size)
 
 
+def _copytree_portable(src: Path, dst: Path) -> None:
+    """Copy a directory tree, following symlinks for portability."""
+    if not dst.exists():
+        dst.mkdir(parents=True)
+    for item in src.iterdir():
+        s = src / item.name
+        d = dst / item.name
+        if s.is_symlink() or s.is_dir():
+            if s.is_symlink():
+                # Resolve symlink and copy the real target for portability
+                real = s.resolve()
+                if real.is_dir():
+                    shutil.copytree(real, d, symlinks=False)
+                else:
+                    shutil.copy2(real, d)
+            else:
+                shutil.copytree(s, d, symlinks=False)
+        else:
+            shutil.copy2(s, d)
+
+
+def _fix_windows_pth(pth: Path) -> None:
+    """Rewrite ._pth lines containing the CI prefix to use relative paths."""
+    if not pth.exists():
+        return
+
+    lines = pth.read_text(encoding="utf-8").splitlines()
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("#") or stripped == "":
+            new_lines.append(line)
+            continue
+
+        # Keep relative entries (Lib, Lib\site-packages, ., etc.) as-is.
+        # Replace absolute entries pointing to the CI prefix with relative paths.
+        norm = stripped.replace("\\", "/")
+        if norm.startswith("lib/") or norm == "." or norm.endswith(".zip"):
+            new_lines.append(line)
+        elif ":" in stripped or stripped.startswith("/"):
+            # Absolute path — skip it; relative Lib/ already covers stdlib
+            print(f"  Dropping absolute _pth entry: {stripped}")
+        else:
+            new_lines.append(line)
+
+    pth.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+
 def build(args):
     repo = Path(__file__).resolve().parents[1]
     platform = PLATFORM_CONFIG[args.os]
@@ -124,7 +172,7 @@ def build(args):
 
     print("\n[3/7] Building GUI (PyInstaller)...")
     run(["uv", "pip", "install", "pyinstaller"], cwd=repo)
-    run([
+    pyinstaller_args = [
         "uv", "run", "pyinstaller",
         "--noconfirm", "--clean", "--onefile",
         "--name", "HifisamplerManager",
@@ -133,8 +181,11 @@ def build(args):
         "--distpath", str(build_dir / "manager-dist"),
         "--workpath", str(build_dir / "manager-work"),
         "--specpath", str(build_dir / "manager-spec"),
-        "portable/manager/gui.py",
-    ], cwd=repo)
+    ]
+    if args.os == "windows":
+        pyinstaller_args.insert(4, "--noconsole")
+    pyinstaller_args.append("portable/manager/gui.py")
+    run(pyinstaller_args, cwd=repo)
 
     print("\n[4/7] Downloading ONNX models...")
     for name, url in MODEL_URLS.items():
@@ -159,13 +210,26 @@ def build(args):
         build_dir / "manager-dist" / platform["manager_name"], stage
     )
 
-    print("\n[6/7] Preparing venv...")
+    print("\n[6/7] Preparing portable Python runtime...")
     runtime_dir = stage / "runtime"
     if runtime_dir.exists():
         shutil.rmtree(runtime_dir)
-    run([
-        "uv", "venv", "--python", "3.10", str(runtime_dir)
-    ], cwd=repo)
+
+    base_prefix = Path(sys.base_prefix)
+    if not base_prefix.exists():
+        raise RuntimeError(f"Base Python prefix not found: {base_prefix}")
+    print(f"  Copying Python install from: {base_prefix}")
+
+    # Copy the full Python installation for true portability.
+    # A venv would hardcode the CI machine's path in pyvenv.cfg.
+    _copytree_portable(base_prefix, runtime_dir)
+
+    # Fix Windows ._pth file to use relative paths after copy.
+    if args.os == "windows":
+        for pth in runtime_dir.glob("python*._pth"):
+            _fix_windows_pth(pth)
+        for pth in runtime_dir.glob("Lib\\python*._pth"):
+            _fix_windows_pth(pth)
 
     runtime_python = None
     for rp in platform["runtime_paths"]:
@@ -174,13 +238,15 @@ def build(args):
             runtime_python = candidate
             break
     if not runtime_python:
-        run([str(runtime_dir / "bin" / "python3" if args.os != "windows" else runtime_dir / "Scripts" / "python.exe"),
-             "-m", "ensurepip"], cwd=repo)
-        runtime_python = runtime_dir / platform["runtime_paths"][0]
+        raise FileNotFoundError(
+            f"Python executable not found in {runtime_dir}, "
+            f"looked for: {platform['runtime_paths']}"
+        )
 
     run([
         "uv", "pip", "install",
         "--python", str(runtime_python),
+        "--system",
         "-r", str(repo / "requirements.txt"),
     ], cwd=repo)
 
@@ -188,6 +254,7 @@ def build(args):
         run([
             "uv", "pip", "install",
             "--python", str(runtime_python),
+            "--system",
             "onnxruntime-directml>=1.22.0",
         ], cwd=repo)
 
